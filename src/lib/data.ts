@@ -66,11 +66,18 @@ function embedded<T>(value: unknown): T | null {
 
 export async function getMyProfile(): Promise<Profile | null> {
   if (!supabaseConfigured()) return null;
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return null;
-  const { data } = await supabase.from("profiles").select("*").eq("id", user.id).single();
-  return (data as Profile) ?? null;
+  try {
+    const supabase = await createClient();
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return null;
+    const { data } = await supabase.from("profiles").select("*").eq("id", user.id).single();
+    return (data as Profile) ?? null;
+  } catch (err) {
+    // A bad URL or an unreachable Supabase must not take the page down; the
+    // caller treats null as "signed out" and shows the login screen.
+    console.error("getMyProfile failed —", (err as Error).message);
+    return null;
+  }
 }
 
 /**

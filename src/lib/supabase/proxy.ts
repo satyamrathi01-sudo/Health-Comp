@@ -1,5 +1,6 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
+import { supabaseAnonKey, supabaseUrl } from "@/lib/env";
 
 const PUBLIC_PATHS = [
   "/login",
@@ -20,16 +21,24 @@ const PUBLIC_PATHS = [
 export async function updateSession(request: NextRequest) {
   let response = NextResponse.next({ request });
 
-  // Before .env.local is filled in, let every request through rather than
-  // throwing an opaque 500. /api/health reports what is missing.
-  if (!process.env.NEXT_PUBLIC_SUPABASE_URL || !process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY) {
-    return response;
-  }
+  const path = request.nextUrl.pathname;
+  const isPublic = PUBLIC_PATHS.some((p) => path === p || path.startsWith(p + "/"));
 
-  const supabase = createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    {
+  const url = supabaseUrl();
+  const key = supabaseAnonKey();
+
+  // Settle public routes BEFORE touching Supabase. The auth call used to run
+  // first, so a malformed URL took down /api/health and /login — precisely the
+  // pages you need when the config is wrong. It also spent a network
+  // round-trip on every icon request.
+  if (isPublic || !url || !key) return response;
+
+  let user = null;
+
+  try {
+    // createServerClient validates the URL eagerly and throws before any
+    // await, so it has to sit inside the try alongside the request itself.
+    const supabase = createServerClient(url, key, {
       cookies: {
         getAll: () => request.cookies.getAll(),
         setAll(list) {
@@ -38,27 +47,23 @@ export async function updateSession(request: NextRequest) {
           list.forEach(({ name, value, options }) => response.cookies.set(name, value, options));
         },
       },
-    },
-  );
+    });
 
-  // Must run: this refreshes an expiring token and rewrites the cookies.
-  const { data: { user } } = await supabase.auth.getUser();
-
-  const path = request.nextUrl.pathname;
-  const isPublic = PUBLIC_PATHS.some((p) => path === p || path.startsWith(p + "/"));
-
-  if (!user && !isPublic) {
-    const url = request.nextUrl.clone();
-    url.pathname = "/login";
-    url.searchParams.set("next", path);
-    return NextResponse.redirect(url);
+    // Must run: this refreshes an expiring token and rewrites the cookies.
+    ({ data: { user } } = await supabase.auth.getUser());
+  } catch (err) {
+    // Fail open rather than 500 the whole site. Every page under (app)
+    // re-checks the profile server-side and bounces to /login, so an
+    // unauthenticated request still gets nowhere.
+    console.error("proxy: Supabase auth unavailable —", (err as Error).message);
+    return response;
   }
 
-  if (user && path === "/login") {
-    const url = request.nextUrl.clone();
-    url.pathname = "/";
-    url.search = "";
-    return NextResponse.redirect(url);
+  if (!user) {
+    const loginUrl = request.nextUrl.clone();
+    loginUrl.pathname = "/login";
+    loginUrl.searchParams.set("next", path);
+    return NextResponse.redirect(loginUrl);
   }
 
   return response;

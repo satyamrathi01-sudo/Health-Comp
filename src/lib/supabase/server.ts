@@ -1,6 +1,7 @@
 import "server-only";
 import { cookies } from "next/headers";
 import { createServerClient } from "@supabase/ssr";
+import { supabaseAnonKey, supabaseUrl } from "@/lib/env";
 
 /** True once both Supabase env vars are present. */
 export function supabaseConfigured(): boolean {
@@ -16,8 +17,8 @@ export function supabaseConfigured(): boolean {
  */
 export function missingSupabaseEnv(): string[] {
   const missing: string[] = [];
-  if (!process.env.NEXT_PUBLIC_SUPABASE_URL) missing.push("NEXT_PUBLIC_SUPABASE_URL");
-  if (!process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY) missing.push("NEXT_PUBLIC_SUPABASE_ANON_KEY");
+  if (!supabaseUrl()) missing.push("NEXT_PUBLIC_SUPABASE_URL");
+  if (!supabaseAnonKey()) missing.push("NEXT_PUBLIC_SUPABASE_ANON_KEY");
   return missing;
 }
 
@@ -31,8 +32,8 @@ export async function createClient() {
   const cookieStore = await cookies();
 
   return createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    supabaseUrl(),
+    supabaseAnonKey(),
     {
       cookies: {
         getAll: () => cookieStore.getAll(),

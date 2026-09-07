@@ -1,11 +1,16 @@
 import { Suspense } from "react";
 import LoginForm from "./LoginForm";
+import { redirect } from "next/navigation";
 import { isHosted, missingSupabaseEnv, supabaseConfigured } from "@/lib/supabase/server";
+import { getMyProfile } from "@/lib/data";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Sign in · FitClash" };
 
-export default function LoginPage() {
+export default async function LoginPage() {
+  const profile = await getMyProfile();
+  if (profile) redirect(profile.onboarded ? "/" : "/onboarding");
+
   return (
     <main className="mx-auto flex min-h-dvh w-full max-w-md flex-col justify-center px-5 py-10">
       <div className="mb-8 text-center">
