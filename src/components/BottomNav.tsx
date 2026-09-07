@@ -16,7 +16,7 @@ export default function BottomNav() {
 
   return (
     <nav
-      className="fixed inset-x-0 bottom-0 z-40 border-t border-ink-700 bg-ink-950/92 backdrop-blur-lg"
+      className="fixed inset-x-0 bottom-0 z-40 border-t border-hair bg-void/95 backdrop-blur-xl"
       style={{ paddingBottom: "env(safe-area-inset-bottom)" }}
     >
       <div className="mx-auto grid max-w-md grid-cols-5 items-center px-2">
@@ -28,9 +28,9 @@ export default function BottomNav() {
           <Link
             href="/log"
             aria-label="Log food or a workout"
-            className="-mt-6 flex h-14 w-14 items-center justify-center rounded-2xl bg-lime-glow text-ink-950 shadow-lg shadow-lime-glow/25 transition-transform active:scale-95"
+            className="-mt-5 flex h-12 w-12 items-center justify-center rounded-full bg-lime-glow text-void transition-transform active:scale-95"
           >
-            <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" aria-hidden="true">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" aria-hidden="true">
               <path d="M12 5v14M5 12h14" />
             </svg>
           </Link>
@@ -49,11 +49,11 @@ function Tab({ href, label, icon, active }: { href: string; label: string; icon:
     <Link
       href={href}
       aria-current={active ? "page" : undefined}
-      className={`flex flex-col items-center gap-1 py-2.5 text-[0.62rem] font-semibold tracking-wide transition-colors ${
-        active ? "text-lime-glow" : "text-mist-500"
+      className={`flex flex-col items-center gap-1 py-3 text-[0.58rem] font-semibold uppercase tracking-[0.12em] transition-colors ${
+        active ? "text-lime-glow" : "text-mist-600"
       }`}
     >
-      <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
         <path d={icon} />
       </svg>
       {label}

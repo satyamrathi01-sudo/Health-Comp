@@ -14,7 +14,7 @@ export default function InviteCard({
 
   if (!challenge) {
     return (
-      <div className="card p-4 text-sm text-mist-500">
+      <div className="surface p-5 text-sm text-mist-600">
         You&apos;re not in a challenge yet.
       </div>
     );
@@ -42,27 +42,27 @@ export default function InviteCard({
   }
 
   return (
-    <div className="card-raised p-4">
+    <div className="surface p-5">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <p className="truncate font-semibold">{challenge.name}</p>
-          <p className="tnum mt-0.5 text-xs text-mist-500">
+          <p className="tnum mt-1 text-xs text-mist-600">
             {daysLeft} day{daysLeft === 1 ? "" : "s"} left ·{" "}
             {hasRival ? `you vs ${rivalName}` : "waiting for your rival"}
           </p>
         </div>
       </div>
 
-      <div className="mt-4 rounded-xl border border-dashed border-ink-600 bg-ink-850 px-4 py-3 text-center">
-        <div className="text-[0.62rem] font-semibold uppercase tracking-widest text-mist-500">
+      <div className="mt-5 rounded-xl border border-dashed border-hair px-4 py-4 text-center">
+        <div className="eyebrow">
           Invite code
         </div>
-        <div className="tnum mt-1 text-2xl font-bold tracking-[0.3em] text-lime-glow">
+        <div className="hero-num tnum mt-2 text-2xl tracking-[0.3em]" style={{ color: "var(--color-lime-glow)" }}>
           {challenge.invite_code}
         </div>
       </div>
 
-      <button className="btn btn-ghost mt-3 w-full" onClick={copy}>
+      <button className="btn btn-ghost mt-4 w-full" onClick={copy}>
         {copied ? "Copied ✓" : "Share with your friend"}
       </button>
     </div>

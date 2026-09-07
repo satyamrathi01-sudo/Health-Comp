@@ -2,7 +2,7 @@ import "server-only";
 import { createClient, supabaseConfigured } from "./supabase/server";
 import { addDays, dateRange, localDate } from "./calc";
 import { dayOutcome, scoreDay, streakEndingAt, type DayScore } from "./scoring";
-import type { Challenge, DailyTotals, Profile } from "./types";
+import { emptyDailyTotals, MICRO_KEYS, type Challenge, type DailyTotals, type Profile, type SleepQuality } from "./types";
 
 export interface PlayerView {
   profile: Profile;
@@ -26,12 +26,6 @@ export interface Arena {
   today: string;
 }
 
-const EMPTY_TOTALS = (user_id: string, local_date: string): DailyTotals => ({
-  user_id, local_date,
-  kcal_in: 0, protein_g: 0, carbs_g: 0, fat_g: 0, fiber_g: 0, meals: 0,
-  kcal_out: 0, active_minutes: 0, sessions: 0, is_rest_day: false,
-});
-
 function num(v: unknown): number {
   const n = typeof v === "number" ? v : Number(v);
   return Number.isFinite(n) ? n : 0;
@@ -52,8 +46,13 @@ function coerceTotals(r: Record<string, unknown>): DailyTotals {
     active_minutes: num(r.active_minutes),
     sessions: num(r.sessions),
     is_rest_day: Boolean(r.is_rest_day),
-  };
+    sleep_hours: r.sleep_hours === null || r.sleep_hours === undefined ? null : num(r.sleep_hours),
+    sleep_quality: (r.sleep_quality as SleepQuality) ?? null,
+    ...Object.fromEntries(MICRO_KEYS.map((k) => [k, num(r[k])])) as Record<keyof typeof EMPTY, number>,
+  } as DailyTotals;
 }
+
+const EMPTY = {} as Record<string, number>;
 
 /**
  * PostgREST returns an embedded relation as either an object or a one-element
@@ -149,7 +148,7 @@ export async function loadArena(windowDays = 30): Promise<Arena | null> {
     );
     const scores = new Map<string, DayScore>();
     for (const d of days) {
-      const t = mine.get(d) ?? EMPTY_TOTALS(profile.id, d);
+      const t = mine.get(d) ?? emptyDailyTotals(profile.id, d);
       // Streak as of that day, so history shows the bonus actually earned.
       scores.set(d, scoreDay(t, d, streakEndingAt(loggedDates, d)));
     }
@@ -192,8 +191,20 @@ export async function loadArena(windowDays = 30): Promise<Arena | null> {
   return { me, challenge, players, days, today };
 }
 
+/**
+ * Every rival visible to me. As the challenge owner that is all of them; as a
+ * rival it is only the owner, because RLS never returns the others.
+ */
+export function rivals(arena: Arena): PlayerView[] {
+  return arena.players.filter((p) => !p.isMe);
+}
+
+/** The rival currently ahead — the one worth showing on the dashboard. */
 export function rival(arena: Arena): PlayerView | null {
-  return arena.players.find((p) => !p.isMe) ?? null;
+  return rivals(arena).reduce<PlayerView | null>(
+    (best, p) => (!best || p.points > best.points ? p : best),
+    null,
+  );
 }
 
 export function mine(arena: Arena): PlayerView {

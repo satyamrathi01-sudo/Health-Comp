@@ -142,23 +142,34 @@ create table if not exists public.ai_cache (
 );
 
 -- =====================================================================
--- Helper: does the current user share a challenge with <target>?
+-- Visibility is HUB AND SPOKE, not a free-for-all.
+--
+-- The challenge owner is the hub: they see every rival they have invited.
+-- Each rival is a spoke: they see themselves and the owner, and nothing of
+-- any other rival. So a rival never learns who else was invited, let alone
+-- what they ate.
+--
+-- Concretely, auth.uid() may read <target> only when they share a challenge
+-- AND at least one of the two is that challenge's creator.
+--
 -- SECURITY DEFINER so the policy does not re-enter challenge_members RLS
 -- (that recursion is the classic Supabase footgun).
 -- =====================================================================
-create or replace function public.shares_challenge_with(target uuid)
+create or replace function public.can_see(target uuid)
 returns boolean
 language sql
 stable
 security definer
 set search_path = public
 as $$
-  select exists (
+  select target = auth.uid() or exists (
     select 1
     from challenge_members me
-    join challenge_members them on them.challenge_id = me.challenge_id
+    join challenges c        on c.id = me.challenge_id
+    join challenge_members them on them.challenge_id = c.id
     where me.user_id = auth.uid()
       and them.user_id = target
+      and (c.created_by = auth.uid() or c.created_by = target)
   );
 $$;
 
@@ -201,45 +212,13 @@ create trigger on_auth_user_created
   for each row execute function public.handle_new_user();
 
 -- =====================================================================
--- daily_totals : SQL aggregates only. Scoring lives in TypeScript
--- (src/lib/scoring.ts) so weights can be tuned without a migration.
--- security_invoker => the caller's RLS applies to the underlying tables.
+-- daily_totals lives in the v2 section at the end of this file.
+--
+-- It is defined exactly once, with DROP + CREATE rather than CREATE OR
+-- REPLACE: replacing a view cannot remove or reorder columns, so a second
+-- definition here made re-running this file fail with "cannot drop columns
+-- from view" once v2 had widened it.
 -- =====================================================================
-create or replace view public.daily_totals
-with (security_invoker = true) as
-with days as (
-  select user_id, local_date from public.food_logs
-  union
-  select user_id, local_date from public.workout_logs
-  union
-  select user_id, local_date from public.rest_days
-)
-select
-  d.user_id,
-  d.local_date,
-  coalesce(f.kcal_in, 0)      as kcal_in,
-  coalesce(f.protein_g, 0)    as protein_g,
-  coalesce(f.carbs_g, 0)      as carbs_g,
-  coalesce(f.fat_g, 0)        as fat_g,
-  coalesce(f.fiber_g, 0)      as fiber_g,
-  coalesce(f.meals, 0)        as meals,
-  coalesce(w.kcal_out, 0)     as kcal_out,
-  coalesce(w.minutes, 0)      as active_minutes,
-  coalesce(w.sessions, 0)     as sessions,
-  (r.user_id is not null)     as is_rest_day
-from days d
-left join (
-  select user_id, local_date,
-         sum(kcal) kcal_in, sum(protein_g) protein_g, sum(carbs_g) carbs_g,
-         sum(fat_g) fat_g, sum(fiber_g) fiber_g, count(*) meals
-  from public.food_logs group by user_id, local_date
-) f on f.user_id = d.user_id and f.local_date = d.local_date
-left join (
-  select user_id, local_date,
-         sum(kcal) kcal_out, sum(minutes) minutes, count(*) sessions
-  from public.workout_logs group by user_id, local_date
-) w on w.user_id = d.user_id and w.local_date = d.local_date
-left join public.rest_days r on r.user_id = d.user_id and r.local_date = d.local_date;
 
 -- =====================================================================
 -- Row Level Security
@@ -270,7 +249,7 @@ begin
     execute format('drop policy if exists %I_mates_read on public.%I', t, t);
     execute format(
       'create policy %I_mates_read on public.%I for select to authenticated
-         using (public.shares_challenge_with(user_id))', t, t);
+         using (public.can_see(user_id))', t, t);
   end loop;
 end $$;
 
@@ -280,7 +259,7 @@ create policy profiles_self on public.profiles for all to authenticated
 
 drop policy if exists profiles_mates_read on public.profiles;
 create policy profiles_mates_read on public.profiles for select to authenticated
-  using (public.shares_challenge_with(id));
+  using (public.can_see(id));
 
 drop policy if exists challenges_read on public.challenges;
 create policy challenges_read on public.challenges for select to authenticated
@@ -294,9 +273,14 @@ drop policy if exists challenges_update on public.challenges;
 create policy challenges_update on public.challenges for update to authenticated
   using (created_by = auth.uid()) with check (created_by = auth.uid());
 
+-- Even the membership list is filtered: without this a rival could read the
+-- roster and learn that other rivals exist.
 drop policy if exists members_read on public.challenge_members;
 create policy members_read on public.challenge_members for select to authenticated
-  using (challenge_id in (select public.my_challenge_ids()));
+  using (
+    challenge_id in (select public.my_challenge_ids())
+    and public.can_see(user_id)
+  );
 
 drop policy if exists members_join on public.challenge_members;
 create policy members_join on public.challenge_members for insert to authenticated
@@ -335,7 +319,7 @@ end;
 $$;
 
 grant execute on function public.join_challenge(text) to authenticated;
-grant execute on function public.shares_challenge_with(uuid) to authenticated;
+grant execute on function public.can_see(uuid) to authenticated;
 grant execute on function public.my_challenge_ids() to authenticated;
 
 -- =====================================================================
@@ -358,3 +342,145 @@ end;
 $$;
 
 grant execute on function public.cache_ai(text, text, text, jsonb) to authenticated;
+
+-- =====================================================================
+-- v2 — micronutrients, sleep, and the AI daily suggestion.
+-- Re-run this whole file; every statement below is idempotent.
+-- =====================================================================
+
+-- Micros are tracked per LOG rather than per item: it keeps the Gemini
+-- response small and fast, and unlike macros they are informational only
+-- (nothing here feeds the score), so per-item precision buys little.
+alter table public.food_logs
+  add column if not exists sodium_mg     numeric(8,1) not null default 0,
+  add column if not exists potassium_mg  numeric(8,1) not null default 0,
+  add column if not exists calcium_mg    numeric(8,1) not null default 0,
+  add column if not exists iron_mg       numeric(7,2) not null default 0,
+  add column if not exists magnesium_mg  numeric(8,1) not null default 0,
+  add column if not exists zinc_mg       numeric(7,2) not null default 0,
+  add column if not exists vitamin_c_mg  numeric(8,1) not null default 0,
+  add column if not exists vitamin_d_ug  numeric(7,2) not null default 0,
+  add column if not exists vitamin_b12_ug numeric(7,2) not null default 0,
+  add column if not exists folate_ug     numeric(8,1) not null default 0,
+  add column if not exists sugar_g       numeric(7,1) not null default 0,
+  add column if not exists satfat_g      numeric(7,1) not null default 0;
+
+-- ---------------------------------------------------------------------
+-- sleep_logs : entered by hand, one per night
+-- ---------------------------------------------------------------------
+create table if not exists public.sleep_logs (
+  user_id    uuid not null references auth.users(id) on delete cascade,
+  local_date date not null,               -- the morning you woke up
+  hours      numeric(4,2) not null check (hours >= 0 and hours <= 24),
+  quality    text check (quality in ('poor','ok','good')),
+  note       text,
+  created_at timestamptz not null default now(),
+  primary key (user_id, local_date)
+);
+
+-- ---------------------------------------------------------------------
+-- daily_advice : the AI's pointers for tomorrow.
+--   basis_hash covers the day's totals, so advice is regenerated only
+--   when the underlying numbers actually move — one Gemini call per
+--   meaningful change rather than one per page view.
+-- ---------------------------------------------------------------------
+create table if not exists public.daily_advice (
+  user_id    uuid not null references auth.users(id) on delete cascade,
+  local_date date not null,
+  basis_hash text not null,
+  points     jsonb not null default '[]'::jsonb,
+  headline   text,
+  created_at timestamptz not null default now(),
+  primary key (user_id, local_date)
+);
+
+alter table public.sleep_logs   enable row level security;
+alter table public.daily_advice enable row level security;
+
+do $$
+declare t text;
+begin
+  foreach t in array array['sleep_logs','daily_advice']
+  loop
+    execute format('drop policy if exists %I_own on public.%I', t, t);
+    execute format(
+      'create policy %I_own on public.%I for all to authenticated
+         using (user_id = auth.uid()) with check (user_id = auth.uid())', t, t);
+    execute format('drop policy if exists %I_mates_read on public.%I', t, t);
+    execute format(
+      'create policy %I_mates_read on public.%I for select to authenticated
+         using (public.can_see(user_id))', t, t);
+  end loop;
+end $$;
+
+-- ---------------------------------------------------------------------
+-- daily_totals : SQL aggregates only. Scoring lives in TypeScript
+-- (src/lib/scoring.ts) so weights can be tuned without a migration.
+-- security_invoker => the caller's RLS applies to the underlying tables.
+--
+-- Dropped and recreated rather than replaced: CREATE OR REPLACE VIEW
+-- cannot add, drop or reorder columns.
+-- ---------------------------------------------------------------------
+drop view if exists public.daily_totals;
+
+create view public.daily_totals
+with (security_invoker = true) as
+with days as (
+  select user_id, local_date from public.food_logs
+  union select user_id, local_date from public.workout_logs
+  union select user_id, local_date from public.rest_days
+  union select user_id, local_date from public.sleep_logs
+)
+select
+  d.user_id,
+  d.local_date,
+  coalesce(f.kcal_in, 0)        as kcal_in,
+  coalesce(f.protein_g, 0)      as protein_g,
+  coalesce(f.carbs_g, 0)        as carbs_g,
+  coalesce(f.fat_g, 0)          as fat_g,
+  coalesce(f.fiber_g, 0)        as fiber_g,
+  coalesce(f.meals, 0)          as meals,
+  coalesce(w.kcal_out, 0)       as kcal_out,
+  coalesce(w.minutes, 0)        as active_minutes,
+  coalesce(w.sessions, 0)       as sessions,
+  (r.user_id is not null)       as is_rest_day,
+  coalesce(f.sodium_mg, 0)      as sodium_mg,
+  coalesce(f.potassium_mg, 0)   as potassium_mg,
+  coalesce(f.calcium_mg, 0)     as calcium_mg,
+  coalesce(f.iron_mg, 0)        as iron_mg,
+  coalesce(f.magnesium_mg, 0)   as magnesium_mg,
+  coalesce(f.zinc_mg, 0)        as zinc_mg,
+  coalesce(f.vitamin_c_mg, 0)   as vitamin_c_mg,
+  coalesce(f.vitamin_d_ug, 0)   as vitamin_d_ug,
+  coalesce(f.vitamin_b12_ug, 0) as vitamin_b12_ug,
+  coalesce(f.folate_ug, 0)      as folate_ug,
+  coalesce(f.sugar_g, 0)        as sugar_g,
+  coalesce(f.satfat_g, 0)       as satfat_g,
+  s.hours                       as sleep_hours,
+  s.quality                     as sleep_quality
+from days d
+left join (
+  select user_id, local_date,
+         sum(kcal) kcal_in, sum(protein_g) protein_g, sum(carbs_g) carbs_g,
+         sum(fat_g) fat_g, sum(fiber_g) fiber_g, count(*) meals,
+         sum(sodium_mg) sodium_mg, sum(potassium_mg) potassium_mg,
+         sum(calcium_mg) calcium_mg, sum(iron_mg) iron_mg,
+         sum(magnesium_mg) magnesium_mg, sum(zinc_mg) zinc_mg,
+         sum(vitamin_c_mg) vitamin_c_mg, sum(vitamin_d_ug) vitamin_d_ug,
+         sum(vitamin_b12_ug) vitamin_b12_ug, sum(folate_ug) folate_ug,
+         sum(sugar_g) sugar_g, sum(satfat_g) satfat_g
+  from public.food_logs group by user_id, local_date
+) f on f.user_id = d.user_id and f.local_date = d.local_date
+left join (
+  select user_id, local_date,
+         sum(kcal) kcal_out, sum(minutes) minutes, count(*) sessions
+  from public.workout_logs group by user_id, local_date
+) w on w.user_id = d.user_id and w.local_date = d.local_date
+left join public.rest_days  r on r.user_id = d.user_id and r.local_date = d.local_date
+left join public.sleep_logs s on s.user_id = d.user_id and s.local_date = d.local_date;
+
+-- =====================================================================
+-- v3 — retire the old any-member-sees-any-member helper. Runs last so no
+-- policy still references it.
+-- =====================================================================
+drop function if exists public.shares_challenge_with(uuid);

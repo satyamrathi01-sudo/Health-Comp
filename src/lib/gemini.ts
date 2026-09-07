@@ -1,6 +1,6 @@
 import "server-only";
 import { createHash } from "crypto";
-import type { Confidence, Exercise, FoodItem } from "./types";
+import { EMPTY_MICROS, MICRO_KEYS, type AdvicePoint, type Confidence, type Exercise, type FoodItem, type Micros } from "./types";
 
 /* ---------------------------------------------------------------------
  * Gemini — server side only. The key must never reach the browser.
@@ -18,7 +18,29 @@ import type { Confidence, Exercise, FoodItem } from "./types";
  * tried in order whenever one is missing or overloaded.
  */
 const DEFAULT_MODEL = "gemini-3.5-flash";
-const FALLBACK_MODELS = ["gemini-3.6-flash", "gemini-flash-latest"];
+
+/**
+ * Free-tier quota is counted PER MODEL PER DAY — gemini-3.5-flash allows just
+ * 20 GenerateRequests/day. Chaining across several models therefore multiplies
+ * the daily headroom, which matters a lot for two people logging four meals
+ * each. Ordered best-quality first.
+ */
+const FALLBACK_MODELS = [
+  // Measured 2026-09-07 on the same prompt:
+  //   3.1-flash-lite  1.1s, accepts thinkingBudget 0   <- fast, cheap fallback
+  //   3.6-flash      15.7s, and only with a budget > 0
+  //   flash-latest   frequently 503 "high demand"
+  "gemini-3.1-flash-lite",
+  "gemini-3.6-flash",
+  "gemini-flash-latest",
+];
+
+/**
+ * Some models reject a zero thinking budget outright. Omitting the config is
+ * NOT a safe fallback — gemini-3.6-flash then thinks at full default and blows
+ * straight past the request timeout — so retry with a small positive budget.
+ */
+const SMALL_THINKING_BUDGET = 128;
 const ENDPOINT = "https://generativelanguage.googleapis.com/v1beta/models";
 
 export function configuredModel(): string {
@@ -46,11 +68,25 @@ export function geminiConfigured(): boolean {
   return Boolean(process.env.GEMINI_API_KEY);
 }
 
+/**
+ * Bump when a prompt or response schema changes shape. Without this, entries
+ * cached under the old shape keep winning and the new fields silently stay
+ * empty forever — micros never appeared for any meal logged before they
+ * existed, which is exactly how this was found.
+ */
+const CACHE_VERSION: Record<string, number> = {
+  food: 2,     // v2 added meal-level micronutrients
+  workout: 2,  // v2 requires sets / reps / load to be filled in
+};
+
 export function cacheKey(kind: string, text: string, salt = ""): string {
   const normalized = text.toLowerCase().replace(/\s+/g, " ").trim();
+  const version = CACHE_VERSION[kind] ?? 1;
   // Deliberately NOT keyed on the model: a cached answer stays usable when the
   // model chain shifts under us, which is the whole point of the fallbacks.
-  return createHash("sha256").update(`${kind}|${salt}|${normalized}`).digest("hex");
+  return createHash("sha256")
+    .update(`${kind}|v${version}|${salt}|${normalized}`)
+    .digest("hex");
 }
 
 type SchemaNode = Record<string, unknown>;
@@ -67,7 +103,7 @@ async function callModel(
   systemPrompt: string,
   userText: string,
   schema: SchemaNode,
-  withThinkingConfig: boolean,
+  thinkingBudget: number | null,
 ): Promise<Attempt> {
   const generationConfig: Record<string, unknown> = {
     responseMimeType: "application/json",
@@ -75,12 +111,9 @@ async function callModel(
     temperature: 0.2, // extraction, not creative writing
   };
 
-  // Thinking is disabled by default so logging a meal feels instant. Some
-  // models reject a zero budget outright, so this is retried without it.
-  if (withThinkingConfig) {
-    generationConfig.thinkingConfig = {
-      thinkingBudget: Number(process.env.GEMINI_THINKING_BUDGET ?? 0),
-    };
+  // Thinking is off by default so logging a meal feels instant.
+  if (thinkingBudget !== null) {
+    generationConfig.thinkingConfig = { thinkingBudget };
   }
 
   const controller = new AbortController();
@@ -130,12 +163,15 @@ async function generate<T>(systemPrompt: string, userText: string, schema: Schem
 
   let last: Attempt | null = null;
 
-  for (const model of modelChain()) {
-    let attempt = await callModel(model, systemPrompt, userText, schema, true);
+  const preferredBudget = Number(process.env.GEMINI_THINKING_BUDGET ?? 0);
 
-    // 400 is usually this model refusing thinkingConfig — retry without it.
-    if (!attempt.ok && attempt.status === 400) {
-      attempt = await callModel(model, systemPrompt, userText, schema, false);
+  for (const model of modelChain()) {
+    let attempt = await callModel(model, systemPrompt, userText, schema, preferredBudget);
+
+    // 400 usually means this model refuses a zero budget — nudge it up rather
+    // than dropping the config, which would leave thinking fully enabled.
+    if (!attempt.ok && attempt.status === 400 && preferredBudget < SMALL_THINKING_BUDGET) {
+      attempt = await callModel(model, systemPrompt, userText, schema, SMALL_THINKING_BUDGET);
     }
 
     if (attempt.ok && attempt.text) {
@@ -148,25 +184,50 @@ async function generate<T>(systemPrompt: string, userText: string, schema: Schem
 
     last = attempt;
 
-    // A retired or overloaded model: move down the chain.
-    if (attempt.status === 404 || attempt.status === 503) continue;
-
-    if (attempt.status === 429) {
-      throw new GeminiError("Gemini free-tier rate limit hit. Wait a minute and retry.", 429);
-    }
-    if (attempt.status === 504) {
-      throw new GeminiError("Gemini took too long. Try again, or enter it manually.", 504);
-    }
+    // Retired (404), overloaded (503), out of quota (429), or too slow (504).
+    // Free-tier quota is counted per model per day, and latency varies wildly
+    // between models, so none of these says anything about the next one.
+    if ([404, 503, 429, 504].includes(attempt.status)) continue;
     if (attempt.status === 400 && (attempt.body ?? "").includes("API_KEY")) {
       throw new GeminiError("That GEMINI_API_KEY was rejected. Check it in AI Studio.", 401);
     }
     throw new GeminiError(`Gemini ${attempt.status}: ${(attempt.body ?? "").slice(0, 300)}`);
   }
 
+  // Everything in the chain is exhausted.
+  if (last?.status === 504) {
+    throw new GeminiError(
+      "Every Gemini model was too slow to answer. Try again, or enter it by hand.",
+      504,
+    );
+  }
+
+  if (last?.status === 429) {
+    throw new GeminiError(
+      `Every Gemini model has used up today's free quota (${modelChain().length} tried). ` +
+        `It resets at midnight Pacific.${retryHint(last.body)} You can still enter this by hand.`,
+      429,
+    );
+  }
+
   throw new GeminiError(
     `No usable Gemini model. Tried ${modelChain().join(", ")}. ` +
       `Last response ${last?.status}: ${(last?.body ?? "").slice(0, 200)}`,
   );
+}
+
+/** Google returns a RetryInfo detail on 429; surface it when present. */
+function retryHint(body: string | undefined): string {
+  if (!body) return "";
+  try {
+    const details = JSON.parse(body)?.error?.details ?? [];
+    const retry = details.find((d: { "@type"?: string }) =>
+      d["@type"]?.includes("RetryInfo"),
+    )?.retryDelay;
+    return retry ? ` Next slot in about ${retry}.` : "";
+  } catch {
+    return "";
+  }
 }
 
 /* ------------------------------- FOOD ------------------------------- */
@@ -191,13 +252,35 @@ const FOOD_SCHEMA: SchemaNode = {
         required: ["name", "qty", "unit", "kcal", "protein_g", "carbs_g", "fat_g", "fiber_g"],
       },
     },
+    micros: {
+      type: "OBJECT",
+      description: "Micronutrient totals for the WHOLE meal, not per item.",
+      properties: {
+        sodium_mg: { type: "NUMBER" },
+        potassium_mg: { type: "NUMBER" },
+        calcium_mg: { type: "NUMBER" },
+        iron_mg: { type: "NUMBER" },
+        magnesium_mg: { type: "NUMBER" },
+        zinc_mg: { type: "NUMBER" },
+        vitamin_c_mg: { type: "NUMBER" },
+        vitamin_d_ug: { type: "NUMBER" },
+        vitamin_b12_ug: { type: "NUMBER" },
+        folate_ug: { type: "NUMBER" },
+        sugar_g: { type: "NUMBER", description: "Added + free sugars, not lactose in milk" },
+        satfat_g: { type: "NUMBER" },
+      },
+      required: [
+        "sodium_mg", "potassium_mg", "calcium_mg", "iron_mg", "magnesium_mg", "zinc_mg",
+        "vitamin_c_mg", "vitamin_d_ug", "vitamin_b12_ug", "folate_ug", "sugar_g", "satfat_g",
+      ],
+    },
     confidence: { type: "STRING", enum: ["low", "medium", "high"] },
     assumptions: {
       type: "STRING",
       description: "One short line on portion sizes assumed. Empty if obvious.",
     },
   },
-  required: ["items", "confidence", "assumptions"],
+  required: ["items", "micros", "confidence", "assumptions"],
 };
 
 const FOOD_PROMPT = `You are a nutrition analyst for a food-logging app used by two friends in India.
@@ -223,10 +306,18 @@ Rules:
   estimation, "low" when you are largely guessing.
 - If the text contains no actual food, return an empty items array.
 
+Also give micronutrient totals for the WHOLE meal (not per item). Be realistic about
+Indian cooking: restaurant and street food carry a lot of sodium; ghee and coconut push
+saturated fat; dal, ragi and leafy sabzi carry useful iron, folate and magnesium; dairy
+and curd carry calcium and B12; a purely vegetarian meal usually has very little B12 and
+essentially no vitamin D. Report 0 for a nutrient a meal genuinely has none of rather
+than sprinkling small numbers everywhere.
+
 Return only JSON matching the schema.`;
 
 export interface FoodParse {
   items: FoodItem[];
+  micros: Micros;
   confidence: Confidence;
   assumptions: string;
 }
@@ -235,9 +326,16 @@ export async function parseFood(text: string): Promise<FoodParse> {
   const raw = await generate<FoodParse>(FOOD_PROMPT, text, FOOD_SCHEMA);
   return {
     items: (raw.items ?? []).map(sanitizeFoodItem).filter((i) => i.name),
+    micros: sanitizeMicros(raw.micros),
     confidence: normalizeConfidence(raw.confidence),
     assumptions: (raw.assumptions ?? "").slice(0, 300),
   };
+}
+
+function sanitizeMicros(m: Partial<Micros> | undefined): Micros {
+  const out = { ...EMPTY_MICROS };
+  for (const key of MICRO_KEYS) out[key] = num(m?.[key], 100000);
+  return out;
 }
 
 function num(v: unknown, max = 100000): number {
@@ -353,5 +451,79 @@ function sanitizeExercise(e: Partial<Exercise>): Omit<Exercise, "kcal"> {
     reps: e.reps ? num(e.reps, 1000) : null,
     weight_kg: e.weight_kg ? num(e.weight_kg, 1000) : null,
     distance_km: e.distance_km ? num(e.distance_km, 1000) : null,
+  };
+}
+
+/* ------------------------------- COACH ------------------------------ */
+
+const ADVICE_SCHEMA: SchemaNode = {
+  type: "OBJECT",
+  properties: {
+    headline: {
+      type: "STRING",
+      description: "Six words or fewer summing up the day, e.g. 'Protein short, training solid'",
+    },
+    points: {
+      type: "ARRAY",
+      description: "Three to five pointers for tomorrow, most important first",
+      items: {
+        type: "OBJECT",
+        properties: {
+          kind: { type: "STRING", enum: ["add", "reduce", "keep", "train", "rest"] },
+          text: {
+            type: "STRING",
+            description: "One concrete sentence, max ~110 characters. Name real foods or actions.",
+          },
+        },
+        required: ["kind", "text"],
+      },
+    },
+  },
+  required: ["headline", "points"],
+};
+
+const ADVICE_PROMPT = `You are a pragmatic strength-and-nutrition coach writing a short
+end-of-day note for someone logging food and training in India.
+
+Give three to five pointers for TOMORROW. Rules:
+
+- Be specific and actionable. "Add 150 g paneer or a bowl of rajma at lunch" beats
+  "eat more protein". Name foods that are ordinary in an Indian kitchen.
+- Lead with whatever actually matters most today. If protein was 40 g short, that is the
+  first point. If they did not train, say so plainly.
+- Use "reduce" when something is genuinely high — sodium over the limit, saturated fat
+  from fried food, added sugar. Do not invent problems: if a day was good, use "keep"
+  and say what to repeat.
+- Comment on sleep only when it was actually logged and is short (under ~7 h) or clearly
+  affecting recovery. Never speculate about sleep that was not recorded.
+- Micronutrients are worth a point only when notably low against the stated target, and
+  only with a real food fix (iron -> ragi, dates, spinach with lemon; B12 -> curd, milk,
+  eggs; vitamin D -> sunlight or a supplement conversation).
+- Tone: direct, warm, no cheerleading, no emoji, no exclamation marks. Address them as
+  "you". This is a friendly competition between two friends, not a clinic.
+- This is general fitness guidance, not medical advice. Do not diagnose, do not name
+  conditions, and do not prescribe doses. If something looks genuinely concerning,
+  suggest they raise it with a doctor and move on.
+
+Return only JSON matching the schema.`;
+
+export interface AdviceResult {
+  headline: string;
+  points: AdvicePoint[];
+}
+
+const ADVICE_KINDS = ["add", "reduce", "keep", "train", "rest"] as const;
+
+export async function generateAdvice(summary: string): Promise<AdviceResult> {
+  const raw = await generate<AdviceResult>(ADVICE_PROMPT, summary, ADVICE_SCHEMA);
+  return {
+    headline: String(raw.headline ?? "").slice(0, 80),
+    points: (raw.points ?? [])
+      .filter((p) => p?.text)
+      .slice(0, 5)
+      .map((p) => ({
+        kind: ADVICE_KINDS.includes(p.kind) ? p.kind : "keep",
+        text: String(p.text).slice(0, 200),
+      })),
   };
 }

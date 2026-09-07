@@ -146,26 +146,26 @@ export default function OnboardingFlow({ profile }: { profile: Profile }) {
 
       {step === 0 ? (
         <>
-          <h1 className="text-2xl font-bold tracking-tight">Your numbers</h1>
-          <p className="mb-5 mt-1 text-sm leading-relaxed text-mist-500">
+          <h1 className="hero-num text-2xl">Your numbers</h1>
+          <p className="mb-6 mt-2 text-sm leading-relaxed text-mist-600">
             Height and weight let the app price your workouts properly — a heavier body
             genuinely burns more for the same run.
           </p>
 
           <div className="space-y-4">
             <label className="block">
-              <span className="mb-1.5 block text-xs font-semibold text-mist-500">Name</span>
+              <span className="eyebrow mb-2 block">Name</span>
               <input className="field" value={name} onChange={(e) => setName(e.target.value)} />
             </label>
 
             <div>
-              <span className="mb-1.5 block text-xs font-semibold text-mist-500">Your emoji</span>
+              <span className="eyebrow mb-2 block">Your emoji</span>
               <div className="hide-scrollbar flex gap-2 overflow-x-auto pb-1">
                 {EMOJI.map((e) => (
                   <button
                     key={e} type="button" onClick={() => setEmoji(e)}
                     className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border text-xl ${
-                      emoji === e ? "border-lime-glow bg-lime-glow/15" : "border-ink-700 bg-ink-850"
+                      emoji === e ? "border-lime-glow bg-lime-glow/15" : "border-hair bg-transparent"
                     }`}
                   >
                     {e}
@@ -176,57 +176,57 @@ export default function OnboardingFlow({ profile }: { profile: Profile }) {
 
             <div className="grid grid-cols-2 gap-3">
               <label className="block">
-                <span className="mb-1.5 block text-xs font-semibold text-mist-500">Sex</span>
+                <span className="eyebrow mb-2 block">Sex</span>
                 <select className="field" value={sex} onChange={(e) => setSex(e.target.value as Sex)}>
                   <option value="male">Male</option>
                   <option value="female">Female</option>
                 </select>
               </label>
               <label className="block">
-                <span className="mb-1.5 block text-xs font-semibold text-mist-500">Date of birth</span>
+                <span className="eyebrow mb-2 block">Date of birth</span>
                 <input className="field" type="date" value={birth} onChange={(e) => setBirth(e.target.value)} />
               </label>
               <label className="block">
-                <span className="mb-1.5 block text-xs font-semibold text-mist-500">Height (cm)</span>
+                <span className="eyebrow mb-2 block">Height (cm)</span>
                 <input className="field tnum" type="number" inputMode="decimal" value={height}
                   onChange={(e) => setHeight(e.target.value)} placeholder="175" />
               </label>
               <label className="block">
-                <span className="mb-1.5 block text-xs font-semibold text-mist-500">Weight (kg)</span>
+                <span className="eyebrow mb-2 block">Weight (kg)</span>
                 <input className="field tnum" type="number" inputMode="decimal" value={weight}
                   onChange={(e) => setWeight(e.target.value)} placeholder="72" />
               </label>
             </div>
 
             <div>
-              <span className="mb-1.5 block text-xs font-semibold text-mist-500">Day-to-day activity</span>
+              <span className="eyebrow mb-2 block">Day-to-day activity</span>
               <div className="space-y-1.5">
                 {ACTIVITY.map((a) => (
                   <button
                     key={a.value} type="button" onClick={() => setActivity(a.value)}
                     className={`flex w-full items-center justify-between rounded-xl border px-3.5 py-2.5 text-left ${
-                      activity === a.value ? "border-lime-glow bg-lime-glow/10" : "border-ink-700 bg-ink-850"
+                      activity === a.value ? "border-lime-glow bg-lime-glow/10" : "border-hair bg-transparent"
                     }`}
                   >
                     <span className="text-sm font-semibold">{a.label}</span>
-                    <span className="text-[0.7rem] text-mist-500">{a.hint}</span>
+                    <span className="text-[0.7rem] text-mist-600">{a.hint}</span>
                   </button>
                 ))}
               </div>
             </div>
 
             <div>
-              <span className="mb-1.5 block text-xs font-semibold text-mist-500">Goal</span>
+              <span className="eyebrow mb-2 block">Goal</span>
               <div className="grid grid-cols-3 gap-2">
                 {GOALS.map((g) => (
                   <button
                     key={g.value} type="button" onClick={() => setGoal(g.value)}
                     className={`rounded-xl border px-2 py-3 text-center ${
-                      goal === g.value ? "border-lime-glow bg-lime-glow/10" : "border-ink-700 bg-ink-850"
+                      goal === g.value ? "border-lime-glow bg-lime-glow/10" : "border-hair bg-transparent"
                     }`}
                   >
                     <div className="text-sm font-semibold">{g.label}</div>
-                    <div className="mt-0.5 text-[0.65rem] leading-tight text-mist-500">{g.hint}</div>
+                    <div className="mt-1 text-[0.65rem] leading-tight text-mist-600">{g.hint}</div>
                   </button>
                 ))}
               </div>
@@ -241,17 +241,17 @@ export default function OnboardingFlow({ profile }: { profile: Profile }) {
         </>
       ) : (
         <>
-          <h1 className="text-2xl font-bold tracking-tight">The challenge</h1>
-          <p className="mb-5 mt-1 text-sm leading-relaxed text-mist-500">
+          <h1 className="hero-num text-2xl">The challenge</h1>
+          <p className="mb-6 mt-2 text-sm leading-relaxed text-mist-600">
             Start one and send your friend the code, or paste theirs.
           </p>
 
-          <div className="mb-4 grid grid-cols-2 gap-1 rounded-xl bg-ink-850 p-1">
+          <div className="mb-5 grid grid-cols-2 gap-1 rounded-xl bg-ink-900 p-1">
             {(["create", "join"] as const).map((m) => (
               <button
                 key={m} type="button" onClick={() => { setMode(m); setError(null); }}
                 className={`rounded-lg py-2 text-sm font-semibold transition-colors ${
-                  mode === m ? "bg-ink-700 text-mist-100" : "text-mist-500"
+                  mode === m ? "bg-ink-800 text-white" : "text-mist-600"
                 }`}
               >
                 {m === "create" ? "Start one" : "Join with code"}
@@ -262,18 +262,18 @@ export default function OnboardingFlow({ profile }: { profile: Profile }) {
           {mode === "create" ? (
             <div className="space-y-4">
               <label className="block">
-                <span className="mb-1.5 block text-xs font-semibold text-mist-500">Challenge name</span>
+                <span className="eyebrow mb-2 block">Challenge name</span>
                 <input className="field" value={challengeName} onChange={(e) => setChallengeName(e.target.value)} />
               </label>
               <label className="block">
-                <span className="mb-1.5 block text-xs font-semibold text-mist-500">Length (weeks)</span>
+                <span className="eyebrow mb-2 block">Length (weeks)</span>
                 <input className="field tnum" type="number" min={1} max={26} value={weeks}
                   onChange={(e) => setWeeks(e.target.value)} />
               </label>
             </div>
           ) : (
             <label className="block">
-              <span className="mb-1.5 block text-xs font-semibold text-mist-500">Invite code</span>
+              <span className="eyebrow mb-2 block">Invite code</span>
               <input
                 className="field tnum text-center text-xl font-bold tracking-[0.3em]"
                 value={code} onChange={(e) => setCode(e.target.value.toUpperCase())}

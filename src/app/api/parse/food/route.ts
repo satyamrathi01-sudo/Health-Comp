@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient, supabaseConfigured } from "@/lib/supabase/server";
 import { cacheKey, GeminiError, parseFood, type FoodParse } from "@/lib/gemini";
-import type { FoodItem } from "@/lib/types";
+import { EMPTY_MICROS, type FoodItem, type Micros } from "@/lib/types";
 
 export const runtime = "nodejs";
 
@@ -53,7 +53,14 @@ export async function POST(request: Request) {
 
   if (cached?.response) {
     const parsed = cached.response as FoodParse;
-    return NextResponse.json({ ...parsed, totals: totalsOf(parsed.items), cached: true });
+    return NextResponse.json({
+      ...parsed,
+      // Entries cached before micros existed have none; zero-fill so the
+      // client always receives the full shape.
+      micros: { ...EMPTY_MICROS, ...(parsed.micros ?? {}) } as Micros,
+      totals: totalsOf(parsed.items),
+      cached: true,
+    });
   }
 
   try {

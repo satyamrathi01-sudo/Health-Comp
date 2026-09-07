@@ -1,5 +1,5 @@
-import { loadArena, mine, rival, type PlayerView } from "@/lib/data";
-import { EmptyState, PageHeader, SectionTitle, StatTile } from "@/components/ui";
+import { loadArena, mine, rival, rivals, type PlayerView } from "@/lib/data";
+import { EmptyState, PageHeader, Section } from "@/components/ui";
 import type { DayScore } from "@/lib/scoring";
 
 export const dynamic = "force-dynamic";
@@ -14,13 +14,14 @@ export default async function VersusPage() {
 
   const me = mine(arena);
   const them = rival(arena);
+  const others = rivals(arena);
 
   if (!them) {
     return (
       <div className="rise">
         <PageHeader title="Versus" subtitle="Nobody to beat yet" />
         <EmptyState
-          icon="🥊"
+          icon="○"
           title="Your rival hasn't joined"
           body="Share the invite code from the Me tab. Once they're in, every day becomes a fixture."
         />
@@ -28,71 +29,118 @@ export default async function VersusPage() {
     );
   }
 
-  const days = [...arena.days].reverse();
-  const challengeLabel = arena.challenge
-    ? `${arena.challenge.name} · ends ${new Date(arena.challenge.end_date + "T00:00:00").toLocaleDateString("en-GB", { day: "numeric", month: "short" })}`
+  const days = [...arena.days].reverse().filter(
+    (d) => me.scores.get(d)!.logged || them.scores.get(d)!.logged,
+  );
+
+  const subtitle = arena.challenge
+    ? arena.challenge.name
     : "Last 30 days";
 
   return (
-    <div className="rise space-y-6">
-      <PageHeader title="Versus" subtitle={challengeLabel} />
+    <div className="rise space-y-8">
+      <PageHeader title="Versus" subtitle={subtitle} />
 
-      {/* ---------------- Standings ---------------- */}
-      <section className="card-raised divide-y divide-ink-700">
-        {[me, them].map((p, i) => (
-          <div key={p.profile.id} className="flex items-center gap-3 px-4 py-3.5">
-            <span className="text-2xl" aria-hidden="true">{p.profile.avatar_emoji}</span>
-            <div className="min-w-0 flex-1">
-              <div className="flex items-center gap-2">
-                <span className="truncate font-semibold">
-                  {p.isMe ? "You" : p.profile.display_name}
-                </span>
-                {p.streak > 0 && (
-                  <span className="tnum shrink-0 text-[0.7rem] text-gold">🔥{p.streak}</span>
-                )}
-              </div>
-              <div className="tnum mt-0.5 text-[0.7rem] text-mist-500">
-                {p.wins}W · {p.losses}L · {p.ties}D
-              </div>
+      {/* ---------- the standing ---------- */}
+      {others.length === 1 ? (
+        <section className="flex items-start justify-between">
+          <Side player={me} color={YOU} align="left" label="You" />
+          <div className="pt-6 text-center">
+            <div className="eyebrow">days won</div>
+            <div className="mt-2 flex items-baseline gap-2">
+              <span className="hero-num tnum text-4xl" style={{ color: YOU }}>{me.wins}</span>
+              <span className="text-lg text-mist-600">–</span>
+              <span className="hero-num tnum text-4xl" style={{ color: THEM }}>{them.wins}</span>
             </div>
-            <div className="text-right">
-              <div className="tnum text-xl font-bold" style={{ color: i === 0 ? YOU : THEM }}>
-                {Math.round(p.points)}
-              </div>
-              <div className="text-[0.62rem] uppercase tracking-wide text-mist-500">points</div>
-            </div>
+            {me.ties > 0 && (
+              <div className="tnum mt-1.5 text-[0.65rem] text-mist-600">{me.ties} drawn</div>
+            )}
           </div>
-        ))}
-      </section>
+          <Side player={them} color={THEM} align="right" label={them.profile.display_name.split(" ")[0]} />
+        </section>
+      ) : (
+        <Section title="Standings">
+          <div className="surface px-5">
+            {[me, ...others]
+              .slice()
+              .sort((a, b) => b.points - a.points)
+              .map((p, i) => (
+                <div key={p.profile.id} className={`flex items-center gap-3 py-3.5 ${i > 0 ? "hair" : ""}`}>
+                  <span className="tnum w-4 text-xs text-mist-600">{i + 1}</span>
+                  <span className="text-xl" aria-hidden="true">{p.profile.avatar_emoji}</span>
+                  <div className="min-w-0 flex-1">
+                    <div className="truncate text-sm font-semibold text-white">
+                      {p.isMe ? "You" : p.profile.display_name}
+                    </div>
+                    <div className="tnum mt-0.5 text-[0.65rem] text-mist-600">
+                      {p.wins}W · {p.losses}L · {p.ties}D
+                      {p.streak > 0 && ` · 🔥${p.streak}`}
+                    </div>
+                  </div>
+                  <span
+                    className="tnum text-lg font-bold"
+                    style={{ color: p.isMe ? YOU : THEM }}
+                  >
+                    {Math.round(p.points)}
+                  </span>
+                </div>
+              ))}
+          </div>
+          <p className="mt-2 px-1 text-[0.65rem] leading-relaxed text-mist-600">
+            You created this challenge, so you see everyone. Each of them sees only their
+            own numbers against yours.
+          </p>
+        </Section>
+      )}
 
-      {/* ---------------- Aggregate stats ---------------- */}
-      <section>
-        <SectionTitle>Head to head, last 30 days</SectionTitle>
-        <div className="grid grid-cols-2 gap-2.5">
+      {/* ---------- totals ---------- */}
+      <Section title={others.length > 1 ? `Last 30 days · vs ${them.profile.display_name.split(" ")[0]}` : "Last 30 days"}>
+        <div className="surface px-5">
+          <Compare label="Points" me={Math.round(me.points)} them={Math.round(them.points)} unit="pts" first />
           <Compare label="Calories burned" me={sum(me, "kcal_out")} them={sum(them, "kcal_out")} unit="kcal" />
-          <Compare label="Protein total" me={sum(me, "protein_g")} them={sum(them, "protein_g")} unit="g" />
+          <Compare label="Protein" me={sum(me, "protein_g")} them={sum(them, "protein_g")} unit="g" />
           <Compare label="Active minutes" me={sum(me, "active_minutes")} them={sum(them, "active_minutes")} unit="min" />
           <Compare label="Days trained" me={trainedDays(me)} them={trainedDays(them)} unit="days" />
+          <Compare label="Best streak" me={me.streak} them={them.streak} unit="days" />
         </div>
-      </section>
+      </Section>
 
-      {/* ---------------- Day by day ---------------- */}
-      <section>
-        <SectionTitle>Day by day</SectionTitle>
-        <ul className="card divide-y divide-ink-700">
-          {days.map((day) => {
-            const a = me.scores.get(day)!;
-            const b = them.scores.get(day)!;
-            if (!a.logged && !b.logged) return null;
-            return <DayRow key={day} day={day} a={a} b={b} isToday={day === arena.today} />;
-          })}
-          {days.every((d) => !me.scores.get(d)!.logged && !them.scores.get(d)!.logged) && (
-            <li className="px-4 py-6 text-center text-sm text-mist-500">
-              Nothing logged yet. First one to log takes the lead.
-            </li>
-          )}
-        </ul>
-      </section>
+      {/* ---------- fixtures ---------- */}
+      <Section title={others.length > 1 ? `Day by day · vs ${them.profile.display_name.split(" ")[0]}` : "Day by day"}>
+        {days.length === 0 ? (
+          <EmptyState icon="○" title="Nothing logged yet" body="First one to log takes the lead." />
+        ) : (
+          <div className="surface px-5">
+            {days.map((day, i) => (
+              <DayRow
+                key={day}
+                day={day}
+                a={me.scores.get(day)!}
+                b={them.scores.get(day)!}
+                isToday={day === arena.today}
+                first={i === 0}
+              />
+            ))}
+          </div>
+        )}
+      </Section>
+    </div>
+  );
+}
+
+function Side({
+  player, color, align, label,
+}: { player: PlayerView; color: string; align: "left" | "right"; label: string }) {
+  return (
+    <div className={align === "right" ? "text-right" : "text-left"}>
+      <div className="text-3xl" aria-hidden="true">{player.profile.avatar_emoji}</div>
+      <div className="mt-2 text-sm font-semibold text-white">{label}</div>
+      <div className="tnum mt-1 text-[0.65rem]" style={{ color }}>
+        {Math.round(player.points)} pts
+      </div>
+      {player.streak > 0 && (
+        <div className="tnum mt-0.5 text-[0.65rem] text-gold">🔥 {player.streak}</div>
+      )}
     </div>
   );
 }
@@ -105,29 +153,42 @@ function trainedDays(p: PlayerView): number {
   return [...p.totals.values()].filter((t) => t.sessions > 0).length;
 }
 
-function Compare({ label, me, them, unit }: { label: string; me: number; them: number; unit: string }) {
-  const winning = me > them;
+function Compare({
+  label, me, them, unit, first,
+}: { label: string; me: number; them: number; unit: string; first?: boolean }) {
   const total = me + them;
   const share = total > 0 ? (me / total) * 100 : 50;
+  const winning = me > them;
+
   return (
-    <div className="card px-3.5 py-3">
-      <div className="text-[0.68rem] font-semibold uppercase tracking-wider text-mist-500">{label}</div>
-      <div className="mt-1.5 flex items-baseline justify-between">
-        <span className="tnum text-lg font-bold" style={{ color: winning ? YOU : "var(--color-mist-100)" }}>
+    <div className={first ? "py-3.5" : "hair py-3.5"}>
+      <div className="flex items-baseline justify-between gap-3">
+        <span
+          className="tnum text-sm font-bold"
+          style={{ color: winning ? "var(--color-lime-glow)" : "var(--color-mist-400)" }}
+        >
           {me.toLocaleString()}
         </span>
-        <span className="tnum text-sm font-semibold text-mist-500">{them.toLocaleString()}</span>
+        <span className="text-[0.7rem] text-mist-600">{label}</span>
+        <span
+          className="tnum text-sm font-bold"
+          style={{ color: !winning && them > me ? "var(--color-flame)" : "var(--color-mist-400)" }}
+        >
+          {them.toLocaleString()}
+        </span>
       </div>
-      <div className="mt-2 flex h-1.5 overflow-hidden rounded-full bg-ink-800">
-        <div style={{ width: `${share}%`, background: YOU }} />
-        <div className="flex-1" style={{ background: THEM }} />
+      <div className="mt-2 flex h-[3px] overflow-hidden rounded-full bg-ink-800">
+        <div style={{ width: `${share}%`, background: "var(--color-lime-glow)" }} />
+        <div className="flex-1" style={{ background: "var(--color-flame)" }} />
       </div>
-      <div className="mt-1 text-[0.62rem] text-mist-500">{unit}</div>
+      <div className="mt-1 text-center text-[0.6rem] text-mist-600">{unit}</div>
     </div>
   );
 }
 
-function DayRow({ day, a, b, isToday }: { day: string; a: DayScore; b: DayScore; isToday: boolean }) {
+function DayRow({
+  day, a, b, isToday, first,
+}: { day: string; a: DayScore; b: DayScore; isToday: boolean; first: boolean }) {
   const label = isToday
     ? "Today"
     : new Date(day + "T00:00:00").toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short" });
@@ -136,27 +197,31 @@ function DayRow({ day, a, b, isToday }: { day: string; a: DayScore; b: DayScore;
   const result = Math.abs(diff) < 0.05 ? "draw" : diff > 0 ? "won" : "lost";
 
   return (
-    <li className="flex items-center gap-3 px-4 py-2.5">
-      <span className="w-24 shrink-0 text-xs text-mist-500">{label}</span>
-      <span className="tnum w-10 text-right text-sm font-bold" style={{ color: YOU }}>
+    <div className={`flex items-center gap-3 ${first ? "py-3" : "hair py-3"}`}>
+      <span className="w-[5.5rem] shrink-0 text-[0.7rem] text-mist-600">{label}</span>
+      <span className="tnum w-8 text-right text-sm font-bold" style={{ color: YOU }}>
         {Math.round(a.total)}
       </span>
-      <div className="flex h-1.5 flex-1 overflow-hidden rounded-full bg-ink-800">
+      <div className="flex h-[3px] flex-1 overflow-hidden rounded-full bg-ink-800">
         <div
-          style={{ width: `${a.total + b.total > 0 ? (a.total / (a.total + b.total)) * 100 : 50}%`, background: YOU }}
+          style={{
+            width: `${a.total + b.total > 0 ? (a.total / (a.total + b.total)) * 100 : 50}%`,
+            background: YOU,
+          }}
         />
         <div className="flex-1" style={{ background: THEM }} />
       </div>
-      <span className="tnum w-10 text-sm font-bold" style={{ color: THEM }}>
+      <span className="tnum w-8 text-sm font-bold" style={{ color: THEM }}>
         {Math.round(b.total)}
       </span>
       <span
-        className={`w-9 shrink-0 text-right text-[0.65rem] font-bold uppercase ${
-          result === "won" ? "text-lime-glow" : result === "lost" ? "text-flame" : "text-mist-500"
-        }`}
+        className="w-6 shrink-0 text-right text-[0.65rem] font-bold uppercase"
+        style={{
+          color: result === "won" ? YOU : result === "lost" ? THEM : "var(--color-mist-600)",
+        }}
       >
-        {result === "won" ? "Win" : result === "lost" ? "Loss" : "Draw"}
+        {result === "won" ? "W" : result === "lost" ? "L" : "D"}
       </span>
-    </li>
+    </div>
   );
 }

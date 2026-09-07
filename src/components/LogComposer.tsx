@@ -4,7 +4,7 @@ import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { burnKcal, guessMealSlot, localHour } from "@/lib/calc";
-import type { Confidence, Exercise, FoodItem, MealSlot, Profile } from "@/lib/types";
+import { EMPTY_MICROS, type Confidence, type Exercise, type FoodItem, type MealSlot, type Micros, type Profile } from "@/lib/types";
 import { PageHeader } from "./ui";
 
 type Tab = "food" | "workout";
@@ -43,6 +43,9 @@ export default function LogComposer({
   const [items, setItems] = useState<FoodItem[] | null>(null);
   const [exercises, setExercises] = useState<Exercise[] | null>(null);
   const [meta, setMeta] = useState<{ confidence: Confidence; assumptions: string; cached: boolean } | null>(null);
+  // Micros are meal-level, so they ride alongside the item list rather than
+  // being derived from it.
+  const [micros, setMicros] = useState<Micros>(EMPTY_MICROS);
 
   const [busy, setBusy] = useState<"analyse" | "save" | "rest" | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -76,6 +79,7 @@ export default function LogComposer({
     setItems(null);
     setExercises(null);
     setMeta(null);
+    setMicros(EMPTY_MICROS);
     setError(null);
     setTuning(null);
   }
@@ -98,8 +102,12 @@ export default function LogComposer({
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Could not analyse that.");
 
-      if (tab === "food") setItems(data.items as FoodItem[]);
-      else setExercises(data.exercises as Exercise[]);
+      if (tab === "food") {
+        setItems(data.items as FoodItem[]);
+        setMicros({ ...EMPTY_MICROS, ...(data.micros ?? {}) });
+      } else {
+        setExercises(data.exercises as Exercise[]);
+      }
 
       setMeta({ confidence: data.confidence, assumptions: data.assumptions, cached: data.cached });
     } catch (err) {
@@ -129,6 +137,7 @@ export default function LogComposer({
           fiber_g: totals.fiber,
           confidence: meta?.confidence ?? "medium",
           source: meta ? "ai" : "manual",
+          ...micros,
         });
         if (error) throw error;
       } else {
@@ -188,13 +197,13 @@ export default function LogComposer({
     <div className="rise space-y-5 pb-4">
       <PageHeader title="Log it" subtitle="Plain English. The AI does the rest." />
 
-      <div className="grid grid-cols-2 gap-1 rounded-xl bg-ink-850 p-1">
+      <div className="grid grid-cols-2 gap-1 rounded-xl bg-ink-900 p-1">
         {(["food", "workout"] as Tab[]).map((t) => (
           <button
             key={t}
             onClick={() => switchTab(t)}
             className={`rounded-lg py-2.5 text-sm font-semibold transition-colors ${
-              tab === t ? "bg-ink-700 text-mist-100" : "text-mist-500"
+              tab === t ? "bg-ink-800 text-white" : "text-mist-600"
             }`}
           >
             {t === "food" ? "🍽️ Food" : "🏋️ Workout"}
@@ -266,13 +275,13 @@ export default function LogComposer({
       ) : (
         <div className="space-y-4">
           {/* ---- totals ---- */}
-          <div className="card-raised p-4">
+          <div className="surface p-5">
             <div className="flex items-end justify-between">
               <div>
-                <div className="text-[0.68rem] font-semibold uppercase tracking-wider text-mist-500">
+                <div className="eyebrow">
                   {tab === "food" ? "Total intake" : "Total burn"}
                 </div>
-                <div className="tnum mt-1 text-3xl font-bold" style={{ color: "var(--color-lime-glow)" }}>
+                <div className="hero-num tnum mt-2 text-3xl" style={{ color: "var(--color-lime-glow)" }}>
                   {totals.kcal}
                   <span className="ml-1 text-sm font-medium text-mist-500">kcal</span>
                 </div>
@@ -298,21 +307,40 @@ export default function LogComposer({
             </div>
 
             {tab === "food" ? (
-              <div className="mt-3 flex gap-4 border-t border-ink-700 pt-3 text-xs text-mist-500">
+              <div className="hair mt-3.5 flex gap-4 pt-3.5 text-xs text-mist-600">
                 <span className="tnum">P <b className="text-mist-100">{totals.protein}</b>g</span>
                 <span className="tnum">C <b className="text-mist-100">{totals.carbs}</b>g</span>
                 <span className="tnum">F <b className="text-mist-100">{totals.fat}</b>g</span>
                 <span className="tnum">Fib <b className="text-mist-100">{totals.fiber}</b>g</span>
               </div>
             ) : (
-              <div className="mt-3 border-t border-ink-700 pt-3 text-xs text-mist-500">
+              <div className="hair mt-3.5 pt-3.5 text-xs text-mist-600">
                 <span className="tnum">{totals.minutes} min</span> · priced at{" "}
                 <span className="tnum">{bodyWeight} kg</span> bodyweight
               </div>
             )}
 
+            {tab === "food" && (micros.sodium_mg > 0 || micros.iron_mg > 0) && (
+              <div className="hair mt-3.5 grid grid-cols-4 gap-2 pt-3.5">
+                {([
+                  ["Sodium", Math.round(micros.sodium_mg), "mg"],
+                  ["Iron", Math.round(micros.iron_mg * 10) / 10, "mg"],
+                  ["Calcium", Math.round(micros.calcium_mg), "mg"],
+                  ["Sugar", Math.round(micros.sugar_g), "g"],
+                ] as const).map(([label, value, unit]) => (
+                  <div key={label}>
+                    <div className="tnum text-sm font-semibold text-mist-200">
+                      {value}
+                      <span className="ml-0.5 text-[0.6rem] text-mist-600">{unit}</span>
+                    </div>
+                    <div className="eyebrow mt-0.5">{label}</div>
+                  </div>
+                ))}
+              </div>
+            )}
+
             {meta?.assumptions && (
-              <p className="mt-2 text-[0.7rem] leading-relaxed text-mist-500">💡 {meta.assumptions}</p>
+              <p className="mt-3 text-[0.7rem] leading-relaxed text-mist-600">{meta.assumptions}</p>
             )}
           </div>
 
@@ -320,7 +348,7 @@ export default function LogComposer({
           <div className="space-y-2">
             {tab === "food"
               ? (items ?? []).map((item, i) => (
-                  <div key={i} className="card p-3">
+                  <div key={i} className="surface p-4">
                     <div className="flex items-center gap-2">
                       <input
                         className="field flex-1 py-1.5 text-sm"
@@ -363,7 +391,7 @@ export default function LogComposer({
                   </div>
                 ))
               : (exercises ?? []).map((ex, i) => (
-                  <div key={i} className="card p-3">
+                  <div key={i} className="surface p-4">
                     <div className="flex items-center gap-2">
                       <input
                         className="field flex-1 py-1.5 text-sm"
@@ -454,7 +482,7 @@ function NumField({
 }: { label: string; value: number; onChange: (v: number) => void; step?: number }) {
   return (
     <label className="block">
-      <span className="mb-1 block text-[0.62rem] font-semibold uppercase tracking-wide text-mist-500">
+      <span className="eyebrow mb-1.5 block">
         {label}
       </span>
       <input
@@ -470,7 +498,7 @@ function NumField({
 function TextField({ label, value, onChange }: { label: string; value: string; onChange: (v: string) => void }) {
   return (
     <label className="block">
-      <span className="mb-1 block text-[0.62rem] font-semibold uppercase tracking-wide text-mist-500">
+      <span className="eyebrow mb-1.5 block">
         {label}
       </span>
       <input className="field py-1.5 text-sm" value={value} onChange={(e) => onChange(e.target.value)} />

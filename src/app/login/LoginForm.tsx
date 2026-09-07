@@ -80,7 +80,7 @@ export default function LoginForm() {
 
   if (clientEnvMissing) {
     return (
-      <div className="card-raised space-y-3 p-5 text-sm leading-relaxed">
+      <div className="surface space-y-3 p-5 text-sm leading-relaxed">
         <p className="font-semibold text-gold">The browser didn&apos;t get the config</p>
         <p className="text-mist-500">
           The server has your Supabase settings, but they were never compiled into the
@@ -88,11 +88,11 @@ export default function LoginForm() {
         </p>
         <p className="text-mist-500">
           On Vercel this means{" "}
-          <code className="text-mist-300">NEXT_PUBLIC_SUPABASE_URL</code> and{" "}
-          <code className="text-mist-300">NEXT_PUBLIC_SUPABASE_ANON_KEY</code> are stored as{" "}
-          <strong className="text-mist-300">Secret</strong>. Secret values are only decrypted
+          <code className="text-mist-400">NEXT_PUBLIC_SUPABASE_URL</code> and{" "}
+          <code className="text-mist-400">NEXT_PUBLIC_SUPABASE_ANON_KEY</code> are stored as{" "}
+          <strong className="text-mist-400">Secret</strong>. Secret values are only decrypted
           at runtime, so the build cannot read them. Re-add both as{" "}
-          <strong className="text-mist-300">Config</strong> and redeploy. Both are public by
+          <strong className="text-mist-400">Config</strong> and redeploy. Both are public by
           design — the anon key ships in this bundle either way, and RLS is what protects
           your data.
         </p>
@@ -101,15 +101,15 @@ export default function LoginForm() {
   }
 
   return (
-    <form onSubmit={submit} className="card-raised space-y-3.5 p-5">
-      <div className="mb-1 grid grid-cols-2 gap-1 rounded-xl bg-ink-850 p-1">
+    <form onSubmit={submit} className="surface space-y-4 p-5">
+      <div className="mb-1 grid grid-cols-2 gap-1 rounded-xl bg-ink-900 p-1">
         {(["in", "up"] as Mode[]).map((m) => (
           <button
             key={m}
             type="button"
             onClick={() => { setMode(m); setError(null); }}
             className={`rounded-lg py-2 text-sm font-semibold transition-colors ${
-              mode === m ? "bg-ink-700 text-mist-100" : "text-mist-500"
+              mode === m ? "bg-ink-800 text-white" : "text-mist-600"
             }`}
           >
             {m === "in" ? "Sign in" : "Create account"}
@@ -119,7 +119,7 @@ export default function LoginForm() {
 
       {mode === "up" && (
         <label className="block">
-          <span className="mb-1.5 block text-xs font-semibold text-mist-500">Name</span>
+          <span className="eyebrow mb-2 block">Name</span>
           <input
             className="field" value={name} onChange={(e) => setName(e.target.value)}
             placeholder="Satyam" autoComplete="name"
@@ -128,7 +128,7 @@ export default function LoginForm() {
       )}
 
       <label className="block">
-        <span className="mb-1.5 block text-xs font-semibold text-mist-500">Email</span>
+        <span className="eyebrow mb-2 block">Email</span>
         <input
           className="field" type="email" required value={email}
           onChange={(e) => setEmail(e.target.value)}
@@ -137,7 +137,7 @@ export default function LoginForm() {
       </label>
 
       <label className="block">
-        <span className="mb-1.5 block text-xs font-semibold text-mist-500">Password</span>
+        <span className="eyebrow mb-2 block">Password</span>
         <input
           className="field" type="password" required minLength={6} value={password}
           onChange={(e) => setPassword(e.target.value)}

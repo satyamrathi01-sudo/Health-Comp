@@ -1,7 +1,8 @@
 import { loadArena, mine, rival } from "@/lib/data";
 import { createClient } from "@/lib/supabase/server";
-import { deriveTargets, ageFrom } from "@/lib/calc";
-import { PageHeader, SectionTitle, StatTile } from "@/components/ui";
+import { ageFrom, deriveTargets } from "@/lib/calc";
+import { DataRow, Metric, PageHeader, Section } from "@/components/ui";
+import Disclosure from "@/components/Disclosure";
 import InviteCard from "@/components/InviteCard";
 import WeighIn from "@/components/WeighIn";
 import SignOut from "@/components/SignOut";
@@ -29,63 +30,74 @@ export default async function MePage() {
       ? Math.round((Number(latest.weight_kg) - Number(oldest.weight_kg)) * 10) / 10
       : null;
 
+  const sleepNights = [...me.totals.values()].filter((t) => t.sleep_hours != null);
+  const avgSleep = sleepNights.length
+    ? Math.round((sleepNights.reduce((a, t) => a + Number(t.sleep_hours), 0) / sleepNights.length) * 10) / 10
+    : null;
+
+  const loggedDays = [...me.totals.values()].filter((t) => t.meals > 0 || t.sessions > 0).length;
+
   return (
-    <div className="rise space-y-6">
+    <div className="rise space-y-8">
       <PageHeader title="Me" subtitle={arena.me.display_name} />
 
-      <section className="card-raised flex items-center gap-4 px-4 py-4">
+      <section className="flex items-center gap-4">
         <span className="text-4xl" aria-hidden="true">{arena.me.avatar_emoji}</span>
         <div className="min-w-0 flex-1">
-          <p className="font-semibold">{arena.me.display_name}</p>
-          <p className="tnum mt-0.5 text-xs text-mist-500">
-            {ageFrom(arena.me.birth_date)} yrs · {arena.me.height_cm} cm ·{" "}
+          <p className="font-semibold text-white">{arena.me.display_name}</p>
+          <p className="tnum mt-0.5 text-xs text-mist-600">
+            {ageFrom(arena.me.birth_date)} · {arena.me.height_cm} cm ·{" "}
             {arena.me.goal === "cut" ? "losing fat" : arena.me.goal === "bulk" ? "building" : "maintaining"}
           </p>
         </div>
-        <div className="text-right">
-          <div className="tnum text-lg font-bold text-lime-glow">{me.streak}</div>
-          <div className="text-[0.6rem] uppercase tracking-wide text-mist-500">day streak</div>
-        </div>
       </section>
 
-      <section>
-        <SectionTitle>Weight</SectionTitle>
+      <section className="grid grid-cols-3 gap-2">
+        <Metric value={me.streak} label="streak" color="var(--color-gold)" unit="d" />
+        <Metric value={loggedDays} label="days logged" unit="/30" />
+        <Metric value={avgSleep ?? "—"} label="avg sleep" unit={avgSleep ? "h" : undefined} />
+      </section>
+
+      <Section title="Weight">
         <WeighIn
           userId={arena.me.id}
           today={arena.today}
           current={latest ? Number(latest.weight_kg) : Number(arena.me.weight_kg) || 0}
           delta={delta}
         />
-      </section>
+      </Section>
 
-      {targets && (
-        <section>
-          <SectionTitle>Your reference numbers</SectionTitle>
-          <div className="grid grid-cols-2 gap-2.5">
-            <StatTile label="Resting burn" value={targets.bmr} unit="kcal" hint="BMR, Mifflin–St Jeor" />
-            <StatTile label="Maintenance" value={targets.tdee} unit="kcal" hint="with your activity level" />
-            <StatTile label="Intake aim" value={targets.kcalTarget} unit="kcal" hint={`for ${arena.me.goal}`} />
-            <StatTile label="Protein aim" value={targets.proteinTarget} unit="g" hint="per day" />
-          </div>
-          <p className="mt-2 px-1 text-[0.68rem] leading-relaxed text-mist-500">
-            These are guidance only. Scoring is on raw numbers — burn, protein, net calories —
-            so nobody gets an easier target than anyone else.
-          </p>
-        </section>
-      )}
-
-      <section>
-        <SectionTitle>Your challenge</SectionTitle>
+      <Section title="Your challenge">
         <InviteCard
           challenge={arena.challenge}
           rivalName={them?.profile.display_name ?? null}
           hasRival={Boolean(them)}
         />
-      </section>
+      </Section>
 
-      <section className="pt-2">
+      {targets && (
+        <section className="surface px-5">
+          <Disclosure label="Reference numbers">
+            <div className="pb-2">
+              <DataRow label="Resting burn (BMR)" value={`${targets.bmr} kcal`} sub="Mifflin–St Jeor" />
+              <div className="hair" />
+              <DataRow label="Maintenance" value={`${targets.tdee} kcal`} sub="with your activity level" />
+              <div className="hair" />
+              <DataRow label="Intake aim" value={`${targets.kcalTarget} kcal`} sub={`for ${arena.me.goal}`} />
+              <div className="hair" />
+              <DataRow label="Protein aim" value={`${targets.proteinTarget} g`} sub="per day" />
+              <p className="hair pt-3 text-[0.65rem] leading-relaxed text-mist-600">
+                Guidance only. Scoring runs on raw numbers — burn, protein, net calories —
+                so neither of you gets an easier target.
+              </p>
+            </div>
+          </Disclosure>
+        </section>
+      )}
+
+      <div className="pt-2">
         <SignOut />
-      </section>
+      </div>
     </div>
   );
 }

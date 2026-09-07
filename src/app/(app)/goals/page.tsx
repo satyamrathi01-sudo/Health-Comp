@@ -1,6 +1,6 @@
 import { loadArena, mine, rival } from "@/lib/data";
 import { createClient } from "@/lib/supabase/server";
-import { EmptyState, PageHeader, SectionTitle } from "@/components/ui";
+import { EmptyState, PageHeader, Section } from "@/components/ui";
 import GoalsBoard from "@/components/GoalsBoard";
 import type { MonthlyGoal } from "@/lib/types";
 
@@ -98,30 +98,31 @@ export default async function GoalsPage() {
       />
 
       {them && (
-        <section>
-          <SectionTitle>
-            {them.profile.avatar_emoji} {them.profile.display_name.split(" ")[0]}&apos;s month
-          </SectionTitle>
+        <Section title={`${them.profile.display_name.split(" ")[0]}'s month`}>
           {theirGoals.length === 0 ? (
-            <EmptyState icon="🫥" title="They haven't set any goals yet" />
+            <EmptyState icon="○" title="They haven't set any goals yet" />
           ) : (
-            <ul className="card divide-y divide-ink-700">
-              {theirGoals.map((g) => (
-                <li key={g.id} className="flex items-center gap-3 px-4 py-3">
-                  <span className="text-sm">{g.done ? "✅" : "⬜"}</span>
+            <div className="surface px-5">
+              {theirGoals.map((g, i) => (
+                <div key={g.id} className={`flex items-center gap-3 py-3.5 ${i > 0 ? "hair" : ""}`}>
+                  <span className="text-xs text-mist-600" aria-hidden="true">
+                    {g.done ? "✓" : "○"}
+                  </span>
                   <span className="min-w-0 flex-1">
-                    <span className="block truncate text-sm font-medium">{g.title}</span>
+                    <span className={`block truncate text-sm ${g.done ? "text-mist-600 line-through" : "text-mist-200"}`}>
+                      {g.title}
+                    </span>
                     {g.target_value !== null && (
-                      <span className="tnum mt-0.5 block text-[0.7rem] text-mist-500">
+                      <span className="tnum mt-0.5 block text-[0.68rem] text-mist-600">
                         {progressByGoal[g.id] ?? "—"} / {g.target_value}
                       </span>
                     )}
                   </span>
-                </li>
+                </div>
               ))}
-            </ul>
+            </div>
           )}
-        </section>
+        </Section>
       )}
     </div>
   );

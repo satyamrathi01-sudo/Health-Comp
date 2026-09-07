@@ -34,10 +34,10 @@ export default function WeighIn({
   }
 
   return (
-    <div className="card p-4">
+    <div className="surface p-5">
       <div className="flex items-end gap-3">
         <label className="flex-1">
-          <span className="mb-1.5 block text-xs font-semibold text-mist-500">Today&apos;s weight (kg)</span>
+          <span className="eyebrow mb-2 block">Today&apos;s weight (kg)</span>
           <input
             className="field tnum" type="number" inputMode="decimal" step="0.1"
             value={value} onChange={(e) => setValue(e.target.value)}
@@ -49,7 +49,7 @@ export default function WeighIn({
       </div>
 
       {delta !== null && delta !== 0 && (
-        <p className="tnum mt-2.5 text-xs text-mist-500">
+        <p className="tnum mt-3 text-xs text-mist-600">
           <span className={delta < 0 ? "font-semibold text-lime-glow" : "font-semibold text-flame"}>
             {delta > 0 ? "+" : ""}{delta} kg
           </span>{" "}

@@ -1,26 +1,31 @@
 import type { ReactNode } from "react";
 
-/* ------------------------------ ScoreDial ---------------------------- */
+/* --------------------------------- Ring ------------------------------
+ * The one dominant element. Thin stroke, generous diameter, the number
+ * carrying the whole screen.
+ * ------------------------------------------------------------------- */
 
-export function ScoreDial({
-  score,
+export function Ring({
+  value,
   max = 100,
-  size = 156,
+  size = 232,
   color = "var(--color-lime-glow)",
-  caption,
+  label,
   sub,
+  children,
 }: {
-  score: number;
+  value: number;
   max?: number;
   size?: number;
   color?: string;
-  caption?: string;
+  label?: string;
   sub?: string;
+  children?: ReactNode;
 }) {
-  const stroke = size / 11;
+  const stroke = 10;
   const r = (size - stroke) / 2;
   const circumference = 2 * Math.PI * r;
-  const pct = Math.max(0, Math.min(1, score / max));
+  const pct = Math.max(0, Math.min(1, max > 0 ? value / max : 0));
 
   return (
     <div className="relative inline-flex items-center justify-center" style={{ width: size, height: size }}>
@@ -34,124 +39,157 @@ export function ScoreDial({
           stroke={color} strokeWidth={stroke} strokeLinecap="round"
           strokeDasharray={circumference}
           strokeDashoffset={circumference * (1 - pct)}
-          style={{ transition: "stroke-dashoffset 0.6s cubic-bezier(0.22, 1, 0.36, 1)" }}
+          style={{ transition: "stroke-dashoffset 0.8s cubic-bezier(0.22, 1, 0.36, 1)" }}
         />
       </svg>
       <div className="absolute inset-0 flex flex-col items-center justify-center">
-        <span className="tnum font-bold leading-none" style={{ fontSize: size / 3.4, color }}>
-          {Math.round(score)}
-        </span>
-        {caption && (
-          <span className="mt-1 text-[0.68rem] font-semibold uppercase tracking-widest text-mist-500">
-            {caption}
-          </span>
+        {children ?? (
+          <>
+            <span className="hero-num tnum" style={{ fontSize: size / 3 }}>
+              {Math.round(value)}
+            </span>
+            {label && <span className="eyebrow mt-2">{label}</span>}
+            {sub && <span className="tnum mt-1 text-xs text-mist-600">{sub}</span>}
+          </>
         )}
-        {sub && <span className="mt-0.5 text-xs text-mist-300">{sub}</span>}
       </div>
     </div>
   );
 }
 
-/* ------------------------------- StatTile ---------------------------- */
+/* -------------------------------- Metric -----------------------------
+ * Big number, tiny label. Used in the quiet row under the ring.
+ * ------------------------------------------------------------------- */
 
-export function StatTile({
-  label,
+export function Metric({
   value,
   unit,
+  label,
+  color,
   hint,
-  accent,
 }: {
-  label: string;
   value: string | number;
   unit?: string;
+  label: string;
+  color?: string;
   hint?: string;
-  accent?: string;
 }) {
   return (
-    <div className="card px-3.5 py-3">
-      <div className="text-[0.68rem] font-semibold uppercase tracking-wider text-mist-500">{label}</div>
-      <div className="mt-1.5 flex items-baseline gap-1">
-        <span className="tnum text-2xl font-bold leading-none" style={accent ? { color: accent } : undefined}>
+    <div className="text-center">
+      <div className="flex items-baseline justify-center gap-0.5">
+        <span
+          className="hero-num tnum text-[1.6rem]"
+          style={color ? { color } : undefined}
+        >
           {value}
         </span>
-        {unit && <span className="text-xs font-medium text-mist-500">{unit}</span>}
+        {unit && <span className="text-[0.65rem] font-medium text-mist-600">{unit}</span>}
       </div>
-      {hint && <div className="mt-1 text-[0.7rem] text-mist-500">{hint}</div>}
+      <div className="eyebrow mt-1.5">{label}</div>
+      {hint && <div className="mt-0.5 text-[0.62rem] text-mist-600">{hint}</div>}
     </div>
   );
 }
 
-/* --------------------------------- Bar ------------------------------- */
+/* ------------------------------- DataRow ----------------------------- */
 
-export function Bar({
+export function DataRow({
+  label,
   value,
-  max,
-  color = "var(--color-lime-glow)",
-  height = 6,
+  sub,
+  color,
+  bar,
 }: {
-  value: number;
-  max: number;
+  label: string;
+  value: ReactNode;
+  sub?: string;
   color?: string;
-  height?: number;
+  /** 0–1; draws a hairline progress track beneath the row */
+  bar?: number;
 }) {
-  const pct = max > 0 ? Math.max(0, Math.min(100, (value / max) * 100)) : 0;
   return (
-    <div
-      className="w-full overflow-hidden rounded-full bg-ink-800"
-      style={{ height }}
-      role="presentation"
-    >
-      <div
-        className="h-full rounded-full"
-        style={{ width: `${pct}%`, background: color, transition: "width 0.5s ease" }}
-      />
+    <div className="py-3">
+      <div className="flex items-baseline justify-between gap-3">
+        <span className="text-sm text-mist-200">{label}</span>
+        <span className="tnum text-sm font-semibold" style={color ? { color } : undefined}>
+          {value}
+        </span>
+      </div>
+      {sub && <div className="mt-0.5 text-[0.68rem] text-mist-600">{sub}</div>}
+      {bar !== undefined && (
+        <div className="mt-2 h-[3px] w-full overflow-hidden rounded-full bg-ink-800">
+          <div
+            className="h-full rounded-full"
+            style={{
+              width: `${Math.max(0, Math.min(100, bar * 100))}%`,
+              background: color ?? "var(--color-lime-glow)",
+              transition: "width 0.6s ease",
+            }}
+          />
+        </div>
+      )}
     </div>
   );
 }
 
 /* ------------------------------ Structure ---------------------------- */
 
-export function SectionTitle({ children, action }: { children: ReactNode; action?: ReactNode }) {
+export function Section({
+  title,
+  action,
+  children,
+}: {
+  title: string;
+  action?: ReactNode;
+  children: ReactNode;
+}) {
   return (
-    <div className="mb-2.5 flex items-center justify-between">
-      <h2 className="text-[0.72rem] font-bold uppercase tracking-[0.14em] text-mist-500">{children}</h2>
-      {action}
-    </div>
+    <section>
+      <div className="mb-3 flex items-baseline justify-between">
+        <h2 className="eyebrow">{title}</h2>
+        {action}
+      </div>
+      {children}
+    </section>
+  );
+}
+
+export function PageHeader({
+  title,
+  subtitle,
+  right,
+}: {
+  title: string;
+  subtitle?: string;
+  right?: ReactNode;
+}) {
+  return (
+    <header className="mb-7 flex items-start justify-between gap-3">
+      <div>
+        <h1 className="text-[1.7rem] font-bold tracking-tight text-white">{title}</h1>
+        {subtitle && <p className="mt-1 text-sm text-mist-600">{subtitle}</p>}
+      </div>
+      {right}
+    </header>
   );
 }
 
 export function EmptyState({ icon, title, body }: { icon: string; title: string; body?: string }) {
   return (
-    <div className="card flex flex-col items-center gap-1.5 px-5 py-8 text-center">
-      <span className="text-3xl" aria-hidden="true">{icon}</span>
-      <p className="font-semibold text-mist-100">{title}</p>
-      {body && <p className="max-w-[34ch] text-sm leading-relaxed text-mist-500">{body}</p>}
+    <div className="surface flex flex-col items-center gap-2 px-6 py-10 text-center">
+      <span className="text-2xl opacity-60" aria-hidden="true">{icon}</span>
+      <p className="text-sm font-semibold text-mist-200">{title}</p>
+      {body && <p className="max-w-[32ch] text-xs leading-relaxed text-mist-600">{body}</p>}
     </div>
   );
 }
 
-export function Pill({ children, tone = "neutral" }: { children: ReactNode; tone?: "neutral" | "good" | "warn" | "bad" }) {
-  const tones = {
-    neutral: "bg-ink-800 text-mist-300 border-ink-700",
-    good: "bg-lime-glow/15 text-lime-glow border-lime-glow/40",
-    warn: "bg-gold/15 text-gold border-gold/40",
-    bad: "bg-danger/15 text-danger border-danger/40",
-  } as const;
+export function StreakBadge({ days }: { days: number }) {
+  if (days <= 0) return null;
   return (
-    <span className={`rounded-full border px-2 py-0.5 text-[0.68rem] font-semibold ${tones[tone]}`}>
-      {children}
-    </span>
-  );
-}
-
-export function PageHeader({ title, subtitle, right }: { title: string; subtitle?: string; right?: ReactNode }) {
-  return (
-    <header className="mb-5 flex items-start justify-between gap-3">
-      <div>
-        <h1 className="text-2xl font-bold tracking-tight">{title}</h1>
-        {subtitle && <p className="mt-0.5 text-sm text-mist-500">{subtitle}</p>}
-      </div>
-      {right}
-    </header>
+    <div className="flex items-center gap-1.5 rounded-full border border-hair px-3 py-1.5">
+      <span className="text-xs" aria-hidden="true">🔥</span>
+      <span className="tnum text-sm font-bold text-gold">{days}</span>
+    </div>
   );
 }

@@ -1,10 +1,7 @@
 import { scoreDay, streakEndingAt, dayOutcome, MAX_BASE_SCORE } from "../src/lib/scoring.ts";
+import { emptyDailyTotals } from "../src/lib/types.ts";
 
-const T = (o: Partial<any> = {}) => ({
-  user_id: "u", local_date: "2026-09-07",
-  kcal_in: 0, protein_g: 0, carbs_g: 0, fat_g: 0, fiber_g: 0, meals: 0,
-  kcal_out: 0, active_minutes: 0, sessions: 0, is_rest_day: false, ...o,
-});
+const T = (o: Partial<any> = {}) => ({ ...emptyDailyTotals("u", "2026-09-07"), ...o });
 
 let fails = 0;
 const check = (name: string, got: unknown, want: unknown) => {

@@ -9,8 +9,8 @@ type Entry =
   | { kind: "food"; at: string; log: FoodLog }
   | { kind: "workout"; at: string; log: WorkoutLog };
 
-const SLOT_ICON: Record<string, string> = {
-  breakfast: "🌅", lunch: "🍛", dinner: "🌙", snack: "🍎",
+const SLOT_LABEL: Record<string, string> = {
+  breakfast: "Breakfast", lunch: "Lunch", dinner: "Dinner", snack: "Snack",
 };
 
 export default function TodayTimeline({ foods, workouts }: { foods: FoodLog[]; workouts: WorkoutLog[] }) {
@@ -35,27 +35,24 @@ export default function TodayTimeline({ foods, workouts }: { foods: FoodLog[]; w
     new Date(iso).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
 
   return (
-    <ul className="space-y-2.5">
-      {entries.map((entry) => {
+    <div className="surface px-5">
+      {entries.map((entry, idx) => {
         const isOpen = open === entry.log.id;
         const isFood = entry.kind === "food";
-        const accent = isFood ? "var(--color-mist-300)" : "var(--color-lime-glow)";
+        const accent = isFood ? "var(--color-mist-200)" : "var(--color-lime-glow)";
 
         return (
-          <li key={entry.log.id} className="card overflow-hidden">
+          <div key={entry.log.id} className={idx > 0 ? "hair" : ""}>
             <button
-              className="flex w-full items-center gap-3 px-3.5 py-3 text-left"
+              className="flex w-full items-center gap-3 py-3.5 text-left"
               onClick={() => setOpen(isOpen ? null : entry.log.id)}
               aria-expanded={isOpen}
             >
-              <span className="text-lg" aria-hidden="true">
-                {isFood ? SLOT_ICON[(entry.log as FoodLog).meal_slot] ?? "🍽️" : "🏋️"}
-              </span>
-
               <span className="min-w-0 flex-1">
-                <span className="block truncate text-sm font-semibold">{entry.log.raw_text}</span>
-                <span className="mt-0.5 block text-[0.7rem] text-mist-500">
-                  {time(entry.at)}
+                <span className="block truncate text-sm text-mist-200">{entry.log.raw_text}</span>
+                <span className="eyebrow mt-1 block">
+                  {isFood ? SLOT_LABEL[(entry.log as FoodLog).meal_slot] ?? "Meal" : "Training"}
+                  {" · "}{time(entry.at)}
                   {isFood
                     ? ` · ${Math.round((entry.log as FoodLog).protein_g)}g protein`
                     : ` · ${Math.round((entry.log as WorkoutLog).minutes)} min`}
@@ -69,14 +66,14 @@ export default function TodayTimeline({ foods, workouts }: { foods: FoodLog[]; w
             </button>
 
             {isOpen && (
-              <div className="border-t border-ink-700 px-3.5 py-3">
+              <div className="pb-4">
                 {isFood ? (
                   <FoodDetail log={entry.log as FoodLog} />
                 ) : (
                   <WorkoutDetail log={entry.log as WorkoutLog} />
                 )}
                 <button
-                  className="btn btn-danger mt-3 w-full py-2 text-xs"
+                  className="btn btn-danger mt-4 w-full py-2 text-xs"
                   disabled={deleting === entry.log.id}
                   onClick={() => remove(entry.kind, entry.log.id)}
                 >
@@ -84,10 +81,10 @@ export default function TodayTimeline({ foods, workouts }: { foods: FoodLog[]; w
                 </button>
               </div>
             )}
-          </li>
+          </div>
         );
       })}
-    </ul>
+    </div>
   );
 }
 
@@ -96,15 +93,15 @@ function FoodDetail({ log }: { log: FoodLog }) {
     <div className="space-y-1.5">
       {log.items.map((item, i) => (
         <div key={i} className="flex items-baseline justify-between gap-2 text-xs">
-          <span className="min-w-0 flex-1 truncate text-mist-300">
+          <span className="min-w-0 flex-1 truncate text-mist-400">
             {item.qty} {item.unit} · {item.name}
           </span>
-          <span className="tnum shrink-0 text-mist-500">
+          <span className="tnum shrink-0 text-mist-600">
             {Math.round(item.kcal)} kcal · {Math.round(item.protein_g)}p
           </span>
         </div>
       ))}
-      <div className="mt-2 flex gap-3 border-t border-ink-700 pt-2 text-[0.7rem] text-mist-500">
+      <div className="hair mt-2.5 flex gap-3 pt-2.5 text-[0.68rem] text-mist-600">
         <span className="tnum">P {Math.round(log.protein_g)}g</span>
         <span className="tnum">C {Math.round(log.carbs_g)}g</span>
         <span className="tnum">F {Math.round(log.fat_g)}g</span>
@@ -119,7 +116,7 @@ function WorkoutDetail({ log }: { log: WorkoutLog }) {
     <div className="space-y-1.5">
       {log.exercises.map((ex, i) => (
         <div key={i} className="flex items-baseline justify-between gap-2 text-xs">
-          <span className="min-w-0 flex-1 truncate text-mist-300">
+          <span className="min-w-0 flex-1 truncate text-mist-400">
             {ex.name}
             {ex.sets ? ` · ${ex.sets}×${ex.reps ?? "?"}` : ""}
             {ex.distance_km ? ` · ${ex.distance_km} km` : ""}
@@ -130,7 +127,7 @@ function WorkoutDetail({ log }: { log: WorkoutLog }) {
         </div>
       ))}
       {log.body_weight_kg && (
-        <div className="mt-2 border-t border-ink-700 pt-2 text-[0.7rem] text-mist-500">
+        <div className="hair mt-2.5 pt-2.5 text-[0.68rem] text-mist-600">
           Burn computed at {log.body_weight_kg} kg bodyweight
         </div>
       )}

@@ -72,23 +72,26 @@ function capped(value: number, per: number, max: number): number {
 }
 
 export function scoreDay(t: DailyTotals | null, date: string, streakDays = 0): DayScore {
-  const totals: DailyTotals = t ?? {
-    user_id: "",
-    local_date: date,
-    kcal_in: 0, protein_g: 0, carbs_g: 0, fat_g: 0, fiber_g: 0, meals: 0,
-    kcal_out: 0, active_minutes: 0, sessions: 0, is_rest_day: false,
-  };
+  // Read fields defensively rather than materialising a zeroed DailyTotals:
+  // that would need a runtime import and cost this module its purity.
+  const kcalIn = t?.kcal_in ?? 0;
+  const kcalOut = t?.kcal_out ?? 0;
+  const proteinG = t?.protein_g ?? 0;
+  const activeMinutes = t?.active_minutes ?? 0;
+  const meals = t?.meals ?? 0;
+  const sessions = t?.sessions ?? 0;
+  const isRestDay = t?.is_rest_day ?? false;
 
-  const hasFood = totals.meals > 0;
-  const trained = totals.sessions > 0;
+  const hasFood = meals > 0;
+  const trained = sessions > 0;
 
-  const burn = capped(totals.kcal_out, SCORING.burn.kcalPerPoint, SCORING.burn.max);
-  const minutes = capped(totals.active_minutes, SCORING.activeMinutes.minutesPerPoint, SCORING.activeMinutes.max);
-  const protein = capped(totals.protein_g, SCORING.protein.gramsPerPoint, SCORING.protein.max);
+  const burn = capped(kcalOut, SCORING.burn.kcalPerPoint, SCORING.burn.max);
+  const minutes = capped(activeMinutes, SCORING.activeMinutes.minutesPerPoint, SCORING.activeMinutes.max);
+  const protein = capped(proteinG, SCORING.protein.gramsPerPoint, SCORING.protein.max);
 
   // Guard: without a food log, "net" would be a big negative number and
   // hand out full marks for logging nothing. No food, no net points.
-  const net = totals.kcal_in - totals.kcal_out;
+  const net = kcalIn - kcalOut;
   let netPoints = 0;
   if (hasFood) {
     const band = SCORING.netCalories.bands.find((b) => net <= b.upTo);
@@ -97,7 +100,7 @@ export function scoreDay(t: DailyTotals | null, date: string, streakDays = 0): D
 
   const loggingPoints =
     (hasFood ? SCORING.logging.food : 0) +
-    (trained || totals.is_rest_day ? SCORING.logging.training : 0);
+    (trained || isRestDay ? SCORING.logging.training : 0);
 
   const bonus = Math.min(SCORING.streak.max, streakDays * SCORING.streak.pointsPerDay);
 
@@ -105,14 +108,14 @@ export function scoreDay(t: DailyTotals | null, date: string, streakDays = 0): D
     {
       key: "burn",
       label: "Calories burned",
-      detail: `${Math.round(totals.kcal_out)} kcal`,
+      detail: `${Math.round(kcalOut)} kcal`,
       points: burn,
       max: SCORING.burn.max,
     },
     {
       key: "protein",
       label: "Protein",
-      detail: `${Math.round(totals.protein_g)} g`,
+      detail: `${Math.round(proteinG)} g`,
       points: protein,
       max: SCORING.protein.max,
     },
@@ -126,14 +129,14 @@ export function scoreDay(t: DailyTotals | null, date: string, streakDays = 0): D
     {
       key: "minutes",
       label: "Active minutes",
-      detail: `${Math.round(totals.active_minutes)} min`,
+      detail: `${Math.round(activeMinutes)} min`,
       points: minutes,
       max: SCORING.activeMinutes.max,
     },
     {
       key: "logging",
       label: "Logged the day",
-      detail: [hasFood ? "food" : null, trained ? "training" : totals.is_rest_day ? "rest day" : null]
+      detail: [hasFood ? "food" : null, trained ? "training" : isRestDay ? "rest day" : null]
         .filter(Boolean)
         .join(" + ") || "nothing yet",
       points: loggingPoints,
@@ -156,7 +159,7 @@ export function scoreDay(t: DailyTotals | null, date: string, streakDays = 0): D
     bonus,
     total: round1(base + bonus),
     lines,
-    logged: hasFood || trained || totals.is_rest_day,
+    logged: hasFood || trained || isRestDay,
   };
 }
 

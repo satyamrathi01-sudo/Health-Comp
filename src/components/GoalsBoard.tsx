@@ -3,7 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { createClient } from "@/lib/supabase/client";
-import { Bar, EmptyState, SectionTitle } from "./ui";
+import { EmptyState, Section } from "./ui";
 import type { MonthlyGoal } from "@/lib/types";
 
 const METRICS: { value: MonthlyGoal["metric"]; label: string; unit: string; hint: string }[] = [
@@ -63,21 +63,19 @@ export default function GoalsBoard({
   }
 
   return (
-    <section>
-      <SectionTitle
-        action={
-          <button className="text-xs font-semibold text-lime-glow" onClick={() => setAdding((v) => !v)}>
-            {adding ? "Cancel" : "Add +"}
-          </button>
-        }
-      >
-        Your month
-      </SectionTitle>
+    <Section
+      title="Your month"
+      action={
+        <button className="text-xs font-semibold text-lime-glow" onClick={() => setAdding((v) => !v)}>
+          {adding ? "Cancel" : "Add"}
+        </button>
+      }
+    >
 
       {adding && (
-        <div className="card-raised mb-3 space-y-3 p-4">
+        <div className="surface mb-3 space-y-3.5 p-5">
           <label className="block">
-            <span className="mb-1.5 block text-xs font-semibold text-mist-500">What are you going for?</span>
+            <span className="eyebrow mb-2 block">What are you going for?</span>
             <input
               className="field" value={title} onChange={(e) => setTitle(e.target.value)}
               placeholder="Hit 130g protein every day" autoFocus
@@ -85,19 +83,19 @@ export default function GoalsBoard({
           </label>
 
           <label className="block">
-            <span className="mb-1.5 block text-xs font-semibold text-mist-500">Track it how?</span>
+            <span className="eyebrow mb-2 block">Track it how?</span>
             <select
               className="field" value={metric}
               onChange={(e) => setMetric(e.target.value as MonthlyGoal["metric"])}
             >
               {METRICS.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
             </select>
-            <span className="mt-1 block text-[0.68rem] text-mist-500">{meta(metric).hint}</span>
+            <span className="mt-1.5 block text-[0.68rem] text-mist-600">{meta(metric).hint}</span>
           </label>
 
           {metric !== "custom" && (
             <label className="block">
-              <span className="mb-1.5 block text-xs font-semibold text-mist-500">
+              <span className="eyebrow mb-2 block">
                 Target ({meta(metric).unit})
               </span>
               <input
@@ -122,8 +120,8 @@ export default function GoalsBoard({
           body="Write down what you want by month end. Your friend sees it too — that's the point."
         />
       ) : (
-        <ul className="space-y-2.5">
-          {goals.map((goal) => {
+        <div className="surface px-5">
+          {goals.map((goal, idx) => {
             const done = progress[goal.id];
             const info = meta(goal.metric);
             const pct =
@@ -132,28 +130,28 @@ export default function GoalsBoard({
                 : null;
 
             return (
-              <li key={goal.id} className="card p-3.5">
+              <div key={goal.id} className={`py-3.5 ${idx > 0 ? "hair" : ""}`}>
                 <div className="flex items-start gap-3">
                   <button
                     onClick={() => toggle(goal)}
-                    className="mt-0.5 text-lg leading-none"
+                    className="mt-0.5 text-xs leading-none text-mist-600"
                     aria-label={goal.done ? "Mark as not done" : "Mark as done"}
                   >
-                    {goal.done ? "✅" : "⬜"}
+                    {goal.done ? "✓" : "○"}
                   </button>
                   <div className="min-w-0 flex-1">
-                    <p className={`text-sm font-medium ${goal.done ? "text-mist-500 line-through" : ""}`}>
+                    <p className={`text-sm ${goal.done ? "text-mist-600 line-through" : "text-mist-200"}`}>
                       {goal.title}
                     </p>
                     {goal.target_value !== null && (
-                      <p className="tnum mt-1 text-[0.7rem] text-mist-500">
-                        <span className="font-semibold text-mist-100">{done ?? "—"}</span>
+                      <p className="tnum mt-1 text-[0.68rem] text-mist-600">
+                        <span className="font-semibold text-white">{done ?? "—"}</span>
                         {" / "}{goal.target_value} {info.unit}
                       </p>
                     )}
                   </div>
                   <button
-                    className="shrink-0 px-1 text-lg leading-none text-mist-500"
+                    className="shrink-0 px-1 text-base leading-none text-mist-600"
                     onClick={() => remove(goal.id)}
                     aria-label="Delete goal"
                   >
@@ -162,15 +160,18 @@ export default function GoalsBoard({
                 </div>
 
                 {pct !== null && (
-                  <div className="mt-2.5">
-                    <Bar value={pct} max={100} height={5} />
+                  <div className="mt-2.5 h-[3px] w-full overflow-hidden rounded-full bg-ink-800">
+                    <div
+                      className="h-full rounded-full"
+                      style={{ width: `${pct}%`, background: "var(--color-lime-glow)" }}
+                    />
                   </div>
                 )}
-              </li>
+              </div>
             );
           })}
-        </ul>
+        </div>
       )}
-    </section>
+    </Section>
   );
 }

@@ -139,3 +139,70 @@ export function dateRange(from: string, to: string): string[] {
   }
   return out;
 }
+
+/* =====================================================================
+ * Micronutrient reference values.
+ *
+ * Indian (ICMR-2020) RDAs where they differ meaningfully from Western
+ * figures — iron and zinc especially, which ICMR sets considerably higher.
+ * `limit` entries are ceilings to stay under; `aim` entries are floors.
+ * ===================================================================== */
+
+import type { Micros, Sex as SexT } from "./types";
+
+export interface MicroRef {
+  key: keyof Micros;
+  label: string;
+  unit: string;
+  mode: "aim" | "limit";
+  male: number;
+  female: number;
+  /** A short reason, shown when the value is off — this is what makes it useful. */
+  why: string;
+}
+
+export const MICRO_REFS: MicroRef[] = [
+  { key: "iron_mg", label: "Iron", unit: "mg", mode: "aim", male: 19, female: 29,
+    why: "Carries oxygen to working muscle" },
+  { key: "calcium_mg", label: "Calcium", unit: "mg", mode: "aim", male: 1000, female: 1000,
+    why: "Bone load tolerance under training" },
+  { key: "potassium_mg", label: "Potassium", unit: "mg", mode: "aim", male: 3500, female: 3500,
+    why: "Offsets sodium, helps cramping" },
+  { key: "magnesium_mg", label: "Magnesium", unit: "mg", mode: "aim", male: 440, female: 370,
+    why: "Muscle relaxation and sleep quality" },
+  { key: "zinc_mg", label: "Zinc", unit: "mg", mode: "aim", male: 17, female: 13.2,
+    why: "Recovery and immune function" },
+  { key: "vitamin_c_mg", label: "Vitamin C", unit: "mg", mode: "aim", male: 80, female: 65,
+    why: "Iron absorption, connective tissue" },
+  { key: "vitamin_d_ug", label: "Vitamin D", unit: "µg", mode: "aim", male: 15, female: 15,
+    why: "Widely low in India; strength and mood" },
+  { key: "vitamin_b12_ug", label: "Vitamin B12", unit: "µg", mode: "aim", male: 2.4, female: 2.4,
+    why: "Easy to miss on a vegetarian diet" },
+  { key: "folate_ug", label: "Folate", unit: "µg", mode: "aim", male: 300, female: 300,
+    why: "Red blood cell production" },
+  { key: "sodium_mg", label: "Sodium", unit: "mg", mode: "limit", male: 2300, female: 2300,
+    why: "Indian cooking runs salty" },
+  { key: "sugar_g", label: "Added sugar", unit: "g", mode: "limit", male: 50, female: 50,
+    why: "Cheap calories that crowd out protein" },
+  { key: "satfat_g", label: "Saturated fat", unit: "g", mode: "limit", male: 22, female: 22,
+    why: "Ghee and fried food add up fast" },
+];
+
+export function microTarget(ref: MicroRef, sex: SexT | null): number {
+  return sex === "female" ? ref.female : ref.male;
+}
+
+/** 0–1 progress toward an "aim", or fraction of a "limit" consumed. */
+export function microRatio(value: number, ref: MicroRef, sex: SexT | null): number {
+  const target = microTarget(ref, sex);
+  return target > 0 ? value / target : 0;
+}
+
+export type MicroVerdict = "low" | "good" | "over";
+
+export function microVerdict(value: number, ref: MicroRef, sex: SexT | null): MicroVerdict {
+  const r = microRatio(value, ref, sex);
+  if (ref.mode === "limit") return r > 1 ? "over" : "good";
+  if (r < 0.6) return "low";
+  return "good";
+}
