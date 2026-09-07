@@ -1,14 +1,28 @@
 "use client";
 
 import { useRouter, useSearchParams } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
+import { supabaseAnonKey, supabaseUrl } from "@/lib/env";
 
 type Mode = "in" | "up";
 
 export default function LoginForm() {
   const router = useRouter();
   const next = useSearchParams().get("next") || "/";
+
+  // NEXT_PUBLIC_* values are compiled into this bundle at build time. If the
+  // host only exposes them at runtime — Vercel does exactly that for variables
+  // marked Secret/Sensitive — the server looks perfectly configured while the
+  // browser gets undefined, and every request dies inside the Supabase client.
+  //
+  // Checked after mount, not during render: server-side this component still
+  // sees a real runtime value, so testing it inline would render the form on
+  // the server and the warning on the client — a hydration mismatch.
+  const [clientEnvMissing, setClientEnvMissing] = useState(false);
+  useEffect(() => {
+    setClientEnvMissing(!supabaseUrl() || !supabaseAnonKey());
+  }, []);
 
   const [mode, setMode] = useState<Mode>("in");
   const [name, setName] = useState("");
@@ -21,9 +35,10 @@ export default function LoginForm() {
     e.preventDefault();
     setError(null);
     setBusy(true);
-    const supabase = createClient();
 
     try {
+      const supabase = createClient();
+
       if (mode === "up") {
         const { error } = await supabase.auth.signUp({
           email,
@@ -50,10 +65,39 @@ export default function LoginForm() {
       router.replace(next);
       router.refresh();
     } catch (err) {
-      setError((err as Error).message);
+      const message = (err as Error).message;
+      setError(
+        message.includes("supabaseUrl") || message.includes("supabaseKey")
+          ? "This page was built without the Supabase settings. On Vercel, re-add " +
+            "NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY as Config " +
+            "rather than Secret, then redeploy."
+          : message,
+      );
     } finally {
       setBusy(false);
     }
+  }
+
+  if (clientEnvMissing) {
+    return (
+      <div className="card-raised space-y-3 p-5 text-sm leading-relaxed">
+        <p className="font-semibold text-gold">The browser didn&apos;t get the config</p>
+        <p className="text-mist-500">
+          The server has your Supabase settings, but they were never compiled into the
+          page you&apos;re looking at — so signing in can&apos;t work.
+        </p>
+        <p className="text-mist-500">
+          On Vercel this means{" "}
+          <code className="text-mist-300">NEXT_PUBLIC_SUPABASE_URL</code> and{" "}
+          <code className="text-mist-300">NEXT_PUBLIC_SUPABASE_ANON_KEY</code> are stored as{" "}
+          <strong className="text-mist-300">Secret</strong>. Secret values are only decrypted
+          at runtime, so the build cannot read them. Re-add both as{" "}
+          <strong className="text-mist-300">Config</strong> and redeploy. Both are public by
+          design — the anon key ships in this bundle either way, and RLS is what protects
+          your data.
+        </p>
+      </div>
+    );
   }
 
   return (
