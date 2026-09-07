@@ -1,26 +1,172 @@
 @import "tailwindcss";
 
+/* =====================================================================
+   FitClash — dark, high-contrast, built for a phone in a gym.
+   Each player owns a colour: you are lime, your rival is orange.
+   ===================================================================== */
+
+@theme {
+  --color-ink-950: #080B0A;
+  --color-ink-900: #0E1312;
+  --color-ink-850: #141A18;
+  --color-ink-800: #1A2220;
+  --color-ink-700: #26312E;
+  --color-ink-600: #37443F;
+
+  --color-mist-500: #7D8F88;
+  --color-mist-300: #A8B8B1;
+  --color-mist-100: #E6EFEB;
+
+  --color-lime-glow: #A3E635;
+  --color-lime-deep: #4D7C0F;
+  --color-flame: #FB923C;
+  --color-flame-deep: #9A3412;
+  --color-danger: #F87171;
+  --color-gold: #FACC15;
+
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
+    "Helvetica Neue", Arial, sans-serif;
+
+  --radius-card: 1.125rem;
+}
+
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  color-scheme: dark;
 }
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+html {
+  background: var(--color-ink-950);
+  /* Stop iOS from bouncing the whole page behind the fixed nav. */
+  overscroll-behavior-y: none;
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  background: var(--color-ink-950);
+  color: var(--color-mist-100);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  /* Room for the fixed bottom nav + the iPhone home indicator. */
+  padding-bottom: calc(4.75rem + env(safe-area-inset-bottom));
+}
+
+/* Numbers in stat blocks must not jitter as they update. */
+.tnum {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum";
+}
+
+/* Cards ------------------------------------------------------------- */
+.card {
+  background: var(--color-ink-900);
+  border: 1px solid var(--color-ink-700);
+  border-radius: var(--radius-card);
+}
+
+.card-raised {
+  background: linear-gradient(180deg, var(--color-ink-850), var(--color-ink-900));
+  border: 1px solid var(--color-ink-700);
+  border-radius: var(--radius-card);
+}
+
+/* Inputs ------------------------------------------------------------ */
+.field {
+  width: 100%;
+  background: var(--color-ink-850);
+  border: 1px solid var(--color-ink-700);
+  border-radius: 0.75rem;
+  padding: 0.75rem 0.875rem;
+  color: var(--color-mist-100);
+  font-size: 1rem; /* < 16px makes iOS Safari zoom on focus */
+  outline: none;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+.field::placeholder { color: var(--color-mist-500); }
+.field:focus {
+  border-color: var(--color-lime-glow);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-lime-glow) 18%, transparent);
+}
+.field:disabled { opacity: 0.55; }
+
+select.field {
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12' fill='none' stroke='%237D8F88' stroke-width='1.6'%3E%3Cpath d='M2.5 4.5 6 8l3.5-3.5'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 0.75rem center;
+  background-size: 0.85rem;
+  padding-right: 2.25rem;
+}
+
+/* Buttons ----------------------------------------------------------- */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  border-radius: 0.75rem;
+  padding: 0.75rem 1.1rem;
+  font-weight: 600;
+  font-size: 0.95rem;
+  border: 1px solid transparent;
+  transition: transform 0.08s ease, opacity 0.15s ease, background 0.15s ease;
+  -webkit-tap-highlight-color: transparent;
+}
+.btn:active:not(:disabled) { transform: scale(0.975); }
+.btn:disabled { opacity: 0.45; cursor: not-allowed; }
+
+.btn-primary {
+  background: var(--color-lime-glow);
+  color: #0B1400;
+}
+.btn-ghost {
+  background: var(--color-ink-850);
+  border-color: var(--color-ink-700);
+  color: var(--color-mist-100);
+}
+.btn-quiet {
+  background: transparent;
+  color: var(--color-mist-300);
+}
+.btn-danger {
+  background: transparent;
+  border-color: color-mix(in srgb, var(--color-danger) 40%, transparent);
+  color: var(--color-danger);
+}
+
+/* Chips ------------------------------------------------------------- */
+.chip {
+  padding: 0.4rem 0.75rem;
+  border-radius: 999px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  border: 1px solid var(--color-ink-700);
+  background: var(--color-ink-850);
+  color: var(--color-mist-300);
+  white-space: nowrap;
+  -webkit-tap-highlight-color: transparent;
+}
+.chip[data-on="true"] {
+  background: color-mix(in srgb, var(--color-lime-glow) 16%, transparent);
+  border-color: var(--color-lime-glow);
+  color: var(--color-lime-glow);
+}
+
+/* Utilities --------------------------------------------------------- */
+.hide-scrollbar::-webkit-scrollbar { display: none; }
+.hide-scrollbar { scrollbar-width: none; }
+
+@keyframes rise {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: none; }
+}
+.rise { animation: rise 0.28s ease both; }
+
+@keyframes pulse-soft {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.45; }
+}
+.thinking { animation: pulse-soft 1.1s ease-in-out infinite; }
+
+@media (prefers-reduced-motion: reduce) {
+  .rise, .thinking { animation: none; }
+  .btn:active:not(:disabled) { transform: none; }
 }
