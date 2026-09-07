@@ -1,7 +1,21 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
-const PUBLIC_PATHS = ["/login", "/auth", "/manifest.webmanifest", "/icon", "/api/health"];
+const PUBLIC_PATHS = [
+  "/login",
+  "/auth",
+  "/api/health",
+  // Next serves these generated metadata routes WITHOUT a file extension
+  // (e.g. /apple-icon?fe5d8954), so the matcher's extension exclusion misses
+  // them. Left unlisted, iOS "Add to Home Screen" fetches the icon, gets
+  // redirected, and saves an HTML login page as the app icon.
+  "/icon",
+  "/apple-icon",
+  "/manifest.webmanifest",
+  "/favicon.ico",
+  "/robots.txt",
+  "/sitemap.xml",
+];
 
 export async function updateSession(request: NextRequest) {
   let response = NextResponse.next({ request });
