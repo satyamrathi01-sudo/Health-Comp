@@ -1,6 +1,6 @@
 import { Suspense } from "react";
 import LoginForm from "./LoginForm";
-import { supabaseConfigured } from "@/lib/supabase/server";
+import { isHosted, missingSupabaseEnv, supabaseConfigured } from "@/lib/supabase/server";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Sign in · FitClash" };
@@ -24,13 +24,34 @@ export default function LoginPage() {
           <LoginForm />
         </Suspense>
       ) : (
-        <div className="card space-y-2 p-5 text-sm leading-relaxed">
+        <div className="card space-y-3 p-5 text-sm leading-relaxed">
           <p className="font-semibold text-gold">Not configured yet</p>
-          <p className="text-mist-500">
-            Copy <code className="text-mist-300">.env.local.example</code> to{" "}
-            <code className="text-mist-300">.env.local</code>, add your Supabase URL and
-            anon key, then restart the dev server. See the README for the 10-minute setup.
-          </p>
+
+          <div>
+            <p className="mb-1.5 text-mist-500">Missing:</p>
+            <ul className="space-y-1">
+              {missingSupabaseEnv().map((name) => (
+                <li key={name} className="tnum text-xs text-danger">
+                  <code>{name}</code>
+                </li>
+              ))}
+            </ul>
+          </div>
+
+          {isHosted() ? (
+            <p className="text-mist-500">
+              Add these in your host&apos;s environment variables, then{" "}
+              <strong className="text-mist-300">redeploy</strong>.{" "}
+              <code className="text-mist-300">NEXT_PUBLIC_</code> values are compiled into
+              the build, so saving them without a fresh build changes nothing.
+            </p>
+          ) : (
+            <p className="text-mist-500">
+              Copy <code className="text-mist-300">.env.local.example</code> to{" "}
+              <code className="text-mist-300">.env.local</code>, fill it in, then restart
+              the dev server. See the README for the 10-minute setup.
+            </p>
+          )}
         </div>
       )}
     </main>

@@ -4,9 +4,26 @@ import { createServerClient } from "@supabase/ssr";
 
 /** True once both Supabase env vars are present. */
 export function supabaseConfigured(): boolean {
-  return Boolean(
-    process.env.NEXT_PUBLIC_SUPABASE_URL && process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
-  );
+  return missingSupabaseEnv().length === 0;
+}
+
+/**
+ * Which Supabase vars are absent, by name.
+ *
+ * Each var is spelled out in full rather than looked up dynamically: Next
+ * substitutes NEXT_PUBLIC_* literally at build time, so `process.env[name]`
+ * would silently read nothing.
+ */
+export function missingSupabaseEnv(): string[] {
+  const missing: string[] = [];
+  if (!process.env.NEXT_PUBLIC_SUPABASE_URL) missing.push("NEXT_PUBLIC_SUPABASE_URL");
+  if (!process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY) missing.push("NEXT_PUBLIC_SUPABASE_ANON_KEY");
+  return missing;
+}
+
+/** Running on a host rather than someone's laptop. */
+export function isHosted(): boolean {
+  return Boolean(process.env.VERCEL) || process.env.NODE_ENV === "production";
 }
 
 /** Server-side Supabase bound to the request's cookies. */
