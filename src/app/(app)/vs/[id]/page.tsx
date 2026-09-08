@@ -1,8 +1,8 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { loadArena, mine, type PlayerView } from "@/lib/data";
+import { loadArena, mine } from "@/lib/data";
 import { dayOutcome } from "@/lib/scoring";
-import { EmptyState, Metric, PageHeader, Section } from "@/components/ui";
+import { EmptyState, PageHeader, Section } from "@/components/ui";
 import ScoreGap from "@/components/ScoreGap";
 
 export const dynamic = "force-dynamic";
@@ -41,9 +41,6 @@ export default async function OneOnOnePage({ params }: { params: Promise<{ id: s
   const todayMine = me.scores.get(arena.today)!;
   const todayTheirs = them.scores.get(arena.today)!;
 
-  const sum = (p: PlayerView, key: "kcal_out" | "protein_g" | "active_minutes") =>
-    Math.round([...p.totals.values()].reduce((acc, t) => acc + t[key], 0));
-
   return (
     <div className="rise space-y-8">
       <PageHeader
@@ -79,18 +76,6 @@ export default async function OneOnOnePage({ params }: { params: Promise<{ id: s
       {/* ---------- today, explained ---------- */}
       <Section title="Today, line by line">
         <ScoreGap mine={todayMine} theirs={todayTheirs} theirName={firstName} />
-      </Section>
-
-      {/* ---------- totals ---------- */}
-      <Section title="Totals">
-        <div className="grid grid-cols-3 gap-2">
-          <Metric value={sum(me, "kcal_out")} unit="kcal" label="you burned" color={YOU} />
-          <Metric value={Math.round(me.points)} unit="pts" label="your points" />
-          <Metric value={sum(them, "kcal_out")} unit="kcal" label={`${firstName} burned`} color={THEM} />
-          <Metric value={sum(me, "protein_g")} unit="g" label="your protein" color={YOU} />
-          <Metric value={`${wins}–${losses}`} label="days won" />
-          <Metric value={sum(them, "protein_g")} unit="g" label={`${firstName} protein`} color={THEM} />
-        </div>
       </Section>
 
       {/* ---------- fixtures ---------- */}

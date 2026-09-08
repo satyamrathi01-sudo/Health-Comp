@@ -108,18 +108,6 @@ export default async function VersusPage() {
         </Section>
       )}
 
-      {/* ---------- totals ---------- */}
-      <Section title={others.length > 1 ? `Last 30 days · vs ${them.profile.display_name.split(" ")[0]}` : "Last 30 days"}>
-        <div className="surface px-5">
-          <Compare label="Points" me={Math.round(me.points)} them={Math.round(them.points)} unit="pts" first />
-          <Compare label="Calories burned" me={sum(me, "kcal_out")} them={sum(them, "kcal_out")} unit="kcal" />
-          <Compare label="Protein" me={sum(me, "protein_g")} them={sum(them, "protein_g")} unit="g" />
-          <Compare label="Active minutes" me={sum(me, "active_minutes")} them={sum(them, "active_minutes")} unit="min" />
-          <Compare label="Days trained" me={trainedDays(me)} them={trainedDays(them)} unit="days" />
-          <Compare label="Best streak" me={me.streak} them={them.streak} unit="days" />
-        </div>
-      </Section>
-
       {/* ---------- fixtures ---------- */}
       <Section title={others.length > 1 ? `Day by day · vs ${them.profile.display_name.split(" ")[0]}` : "Day by day"}>
         {days.length === 0 ? (
@@ -156,47 +144,6 @@ function Side({
       {player.streak > 0 && (
         <div className="tnum mt-0.5 text-[0.65rem] text-gold">🔥 {player.streak}</div>
       )}
-    </div>
-  );
-}
-
-function sum(p: PlayerView, key: "kcal_out" | "protein_g" | "active_minutes"): number {
-  return Math.round([...p.totals.values()].reduce((a, t) => a + t[key], 0));
-}
-
-function trainedDays(p: PlayerView): number {
-  return [...p.totals.values()].filter((t) => t.sessions > 0).length;
-}
-
-function Compare({
-  label, me, them, unit, first,
-}: { label: string; me: number; them: number; unit: string; first?: boolean }) {
-  const total = me + them;
-  const share = total > 0 ? (me / total) * 100 : 50;
-  const winning = me > them;
-
-  return (
-    <div className={first ? "py-3.5" : "hair py-3.5"}>
-      <div className="flex items-baseline justify-between gap-3">
-        <span
-          className="tnum text-sm font-bold"
-          style={{ color: winning ? "var(--color-lime-glow)" : "var(--color-mist-400)" }}
-        >
-          {me.toLocaleString()}
-        </span>
-        <span className="text-[0.7rem] text-mist-600">{label}</span>
-        <span
-          className="tnum text-sm font-bold"
-          style={{ color: !winning && them > me ? "var(--color-flame)" : "var(--color-mist-400)" }}
-        >
-          {them.toLocaleString()}
-        </span>
-      </div>
-      <div className="mt-2 flex h-[3px] overflow-hidden rounded-full bg-ink-800">
-        <div style={{ width: `${share}%`, background: "var(--color-lime-glow)" }} />
-        <div className="flex-1" style={{ background: "var(--color-flame)" }} />
-      </div>
-      <div className="mt-1 text-center text-[0.6rem] text-mist-600">{unit}</div>
     </div>
   );
 }
