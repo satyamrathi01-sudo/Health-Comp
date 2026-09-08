@@ -2,22 +2,28 @@ import { createHash } from "crypto";
 import { NextResponse } from "next/server";
 import { createClient, supabaseConfigured } from "@/lib/supabase/server";
 import { generateAdvice, GeminiError } from "@/lib/gemini";
-import { deriveTargets, MICRO_REFS, microTarget } from "@/lib/calc";
-import { scoreDay } from "@/lib/scoring";
-import type { DailyTotals, Profile } from "@/lib/types";
+import { applyGoalsToTargets, daysInMonthOf, deriveTargets, MICRO_REFS, microTarget } from "@/lib/calc";
+import { projectedGain, scoreDay, type ScoreTargets } from "@/lib/scoring";
+import type { AdvicePoint, DailyTotals, MonthlyGoal, Profile } from "@/lib/types";
 
 export const runtime = "nodejs";
 
 /** Build the plain-text briefing the coach reasons over. */
-function briefing(profile: Profile, today: DailyTotals | null, week: DailyTotals[]): string {
-  const targets = deriveTargets(profile);
+function briefing(
+  profile: Profile,
+  today: DailyTotals | null,
+  week: DailyTotals[],
+  goals: MonthlyGoal[],
+  targets: ScoreTargets | null,
+): string {
   const n = (v: number | null | undefined) => Math.round(Number(v ?? 0));
 
   const lines: string[] = [
     `Person: ${profile.sex ?? "unspecified"}, goal ${profile.goal}, ${profile.weight_kg} kg.`,
     targets
-      ? `Reference: maintenance ~${targets.tdee} kcal, intake aim ~${targets.kcalTarget} kcal, protein aim ~${targets.proteinTarget} g.`
-      : "Reference: not enough profile data for targets.",
+      ? `Daily targets they are scored against: ${targets.kcalTarget} kcal intake, ` +
+        `${targets.proteinTarget} g protein, ${targets.burnTarget} kcal burned.`
+      : "Targets: not enough profile data.",
     "",
     "TODAY",
     `  Eaten ${n(today?.kcal_in)} kcal across ${n(today?.meals)} meals.`,
@@ -54,6 +60,20 @@ function briefing(profile: Profile, today: DailyTotals | null, week: DailyTotals
       `  Average intake ${avg((d) => d.kcal_in)} kcal, protein ${avg((d) => d.protein_g)} g, burn ${avg((d) => d.kcal_out)} kcal.`,
       `  Trained on ${week.filter((d) => d.sessions > 0).length} of the last ${week.length} days.`,
     );
+  }
+
+  const active = goals.filter((g) => !g.done);
+  if (active.length) {
+    lines.push("", "THEIR GOALS THIS MONTH — these take priority over anything else:");
+    for (const g of active) {
+      lines.push(
+        g.target_value !== null
+          ? `  - ${g.title} (target ${g.target_value}, tracked as ${g.metric})`
+          : `  - ${g.title}`,
+      );
+    }
+  } else {
+    lines.push("", "They have set no goals this month.");
   }
 
   return lines.join("\n");
@@ -99,6 +119,26 @@ export async function POST(request: Request) {
   const week = (rows ?? []) as DailyTotals[];
   const todayTotals = week.find((d) => d.local_date === today) ?? null;
 
+  const monthStart = today.slice(0, 8) + "01";
+  const { data: goalRows } = await supabase
+    .from("monthly_goals").select("*")
+    .eq("user_id", user.id).eq("month", monthStart);
+  const goals = (goalRows ?? []) as MonthlyGoal[];
+
+  // Goals override the derived targets where they overlap, so the coach and
+  // the score are working from the same numbers.
+  const derived = deriveTargets(profile);
+  const adjusted = derived
+    ? applyGoalsToTargets(derived, goals, profile.weight_kg, daysInMonthOf(today))
+    : null;
+  const targets: ScoreTargets | null = adjusted
+    ? {
+        burnTarget: adjusted.burnTarget,
+        proteinTarget: adjusted.proteinTarget,
+        kcalTarget: adjusted.kcalTarget,
+      }
+    : null;
+
   if (!todayTotals || (todayTotals.meals === 0 && todayTotals.sessions === 0)) {
     return NextResponse.json(
       { error: "Log something first — there's nothing to advise on yet." },
@@ -106,7 +146,7 @@ export async function POST(request: Request) {
     );
   }
 
-  const text = briefing(profile, todayTotals, week);
+  const text = briefing(profile, todayTotals, week, goals, targets);
 
   // Regenerate only when the day's numbers actually moved. Without this the
   // coach would burn a Gemini call on every dashboard render.
@@ -131,6 +171,20 @@ export async function POST(request: Request) {
 
   try {
     const advice = await generateAdvice(text);
+
+    // The model proposes; the scoring engine prices. Re-scoring the day with
+    // each change applied means the number shown can never contradict the
+    // score itself.
+    const priced: AdvicePoint[] = advice.points.map((p) => ({
+      ...p,
+      points: projectedGain(
+        { component: p.component ?? "none", amount: p.amount ?? 0 },
+        todayTotals,
+        0,
+        targets,
+      ),
+    }));
+    advice.points = priced;
 
     await supabase.from("daily_advice").upsert({
       user_id: user.id,

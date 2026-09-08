@@ -123,7 +123,27 @@ export default function AdviceCard({ hasData }: { hasData: boolean }) {
             >
               {ICON[p.kind]}
             </span>
-            <span className="text-[0.82rem] leading-relaxed text-mist-200">{p.text}</span>
+            <span className="min-w-0 flex-1">
+              <span className="block text-[0.82rem] leading-relaxed text-mist-200">{p.text}</span>
+              {p.points !== undefined && (
+                <span className="mt-1 block text-[0.65rem] text-mist-600">
+                  {p.points > 0 ? (
+                    <>
+                      <span className="font-semibold text-lime-glow">
+                        +{p.points} pts
+                      </span>{" "}
+                      on today&apos;s score
+                    </>
+                  ) : p.component === "sleep" ? (
+                    "Not scored — but it drives recovery and tomorrow's training"
+                  ) : p.component === "micros" ? (
+                    "Not scored — long-term health, not points"
+                  ) : (
+                    "No points left on that line today"
+                  )}
+                </span>
+              )}
+            </span>
           </li>
         ))}
       </ul>

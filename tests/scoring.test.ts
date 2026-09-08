@@ -154,5 +154,89 @@ const burnGap = relGap.lines.find((l) => l.key === "burn")!;
 check("hint uses the small target, not the global constant",
   /200 kcal more/.test(burnGap.toClose ?? ""), true);
 
+
+// ---- projected impact of a suggestion ----
+import { projectedGain } from "../src/lib/scoring.ts";
+
+const day = T({ kcal_in: 1500, protein_g: 60, meals: 2, kcal_out: 150, active_minutes: 20, sessions: 1 });
+
+const proteinGain = projectedGain({ component: "protein", amount: 40 }, day, 0, BIG);
+check("adding protein is worth points", proteinGain > 0, true);
+check("40g against a 170g target is ~5.9 pts", proteinGain, 5.9);
+
+// Already maxed: more cannot help.
+const maxed = T({ kcal_out: 900, sessions: 1, meals: 1, protein_g: 200 });
+check("no gain once the line is capped",
+  projectedGain({ component: "burn", amount: 500 }, maxed, 0, BIG), 0);
+
+// Sleep and micros are tracked but not scored — say zero rather than invent.
+check("sleep is worth 0 points", projectedGain({ component: "sleep", amount: 1 }, day, 0, BIG), 0);
+check("micros are worth 0 points", projectedGain({ component: "micros", amount: 1 }, day, 0, BIG), 0);
+
+// Eating less moves you toward the target when you are over it.
+const over = T({ kcal_in: 3400, meals: 3 });
+check("cutting calories when over target helps",
+  projectedGain({ component: "calories", amount: -900 }, over, 0, BIG) > 0, true);
+
+// Logging the missing half of the day is worth exactly the logging points.
+const foodOnly = T({ kcal_in: 2400, meals: 2, protein_g: 170 });
+check("logging training adds the training half",
+  projectedGain({ component: "logging", amount: 0 }, foodOnly, 0, BIG), 5);
+
+// A projection must never exceed what the score could actually move by.
+const beforeTotal = scoreDay(day, "d", 0, BIG).total;
+check("projection cannot push past the ceiling",
+  beforeTotal + projectedGain({ component: "protein", amount: 9999 }, day, 0, BIG) <= 110, true);
+
+
+// ---- goals steer the targets ----
+import { applyGoalsToTargets, daysInMonthOf } from "../src/lib/calc.ts";
+
+const baseTargets = {
+  bmr: 1700, tdee: 2600, kcalTarget: 2100, proteinTarget: 148, burnTarget: 390,
+};
+
+const proteinGoal = applyGoalsToTargets(
+  baseTargets, [{ metric: "avg_protein_g", target_value: 150 }], 74, 30);
+check("a protein goal overrides the formula", proteinGoal.proteinTarget, 150);
+check("and is marked as coming from the goal", proteinGoal.source.protein, "goal");
+check("untouched targets stay from the profile", proteinGoal.source.burn, "profile");
+
+const burnGoal = applyGoalsToTargets(
+  baseTargets, [{ metric: "total_kcal_burned", target_value: 12000 }], 74, 30);
+check("a monthly burn total becomes a daily target", burnGoal.burnTarget, 400);
+
+// A target weight must not contradict the calorie aim.
+const cut = applyGoalsToTargets(baseTargets, [{ metric: "weight_kg", target_value: 68 }], 74, 30);
+check("wanting to be lighter forces a deficit", cut.kcalTarget <= baseTargets.tdee - 400, true);
+const gain = applyGoalsToTargets(baseTargets, [{ metric: "weight_kg", target_value: 80 }], 74, 30);
+check("wanting to be heavier forces a surplus", gain.kcalTarget >= baseTargets.tdee + 250, true);
+const same = applyGoalsToTargets(baseTargets, [{ metric: "weight_kg", target_value: 74 }], 74, 30);
+check("a weight goal at current weight changes nothing", same.kcalTarget, baseTargets.kcalTarget);
+
+// Goals without a daily equivalent must not corrupt the targets.
+const soft = applyGoalsToTargets(
+  baseTargets,
+  [{ metric: "workout_days", target_value: 20 }, { metric: "custom", target_value: null }],
+  74, 30);
+check("soft goals leave targets alone", soft.proteinTarget, baseTargets.proteinTarget);
+check("nonsense target values are ignored",
+  applyGoalsToTargets(baseTargets, [{ metric: "avg_protein_g", target_value: -5 }], 74, 30).proteinTarget,
+  baseTargets.proteinTarget);
+
+check("days in month is right for February 2026", daysInMonthOf("2026-02-10"), 28);
+check("days in month is right for September", daysInMonthOf("2026-09-08"), 30);
+
+// A goal must actually change the score, not just the displayed target.
+const dayAt150 = T({ protein_g: 150, meals: 3 });
+const withGoal = scoreDay(dayAt150, "d", 0,
+  { burnTarget: 390, proteinTarget: 150, kcalTarget: 2100 });
+const withoutGoal = scoreDay(dayAt150, "d", 0,
+  { burnTarget: 390, proteinTarget: 200, kcalTarget: 2100 });
+check("hitting your goal target maxes protein",
+  withGoal.lines.find((l) => l.key === "protein")!.points, 25);
+check("a harder target scores the same intake lower",
+  withoutGoal.lines.find((l) => l.key === "protein")!.points < 25, true);
+
 console.log(fails === 0 ? "\nAll scoring checks passed." : `\n${fails} FAILED`);
 process.exit(fails === 0 ? 0 : 1);

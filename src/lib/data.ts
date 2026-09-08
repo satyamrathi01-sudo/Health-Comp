@@ -1,8 +1,8 @@
 import "server-only";
 import { createClient, supabaseConfigured } from "./supabase/server";
-import { addDays, dateRange, deriveTargets, localDate } from "./calc";
+import { addDays, applyGoalsToTargets, dateRange, daysInMonthOf, deriveTargets, localDate } from "./calc";
 import { dayOutcome, scoreDay, streakEndingAt, type DayScore } from "./scoring";
-import { emptyDailyTotals, MICRO_KEYS, type Challenge, type DailyTotals, type Profile, type SleepQuality } from "./types";
+import { emptyDailyTotals, MICRO_KEYS, type Challenge, type DailyTotals, type MonthlyGoal, type Profile, type SleepQuality } from "./types";
 
 export interface PlayerView {
   profile: Profile;
@@ -24,6 +24,8 @@ export interface Arena {
   players: PlayerView[];
   days: string[];
   today: string;
+  /** This month's goals for everyone visible. */
+  goals: MonthlyGoal[];
 }
 
 function num(v: unknown): number {
@@ -122,6 +124,11 @@ async function loadArenaLegacy(windowDays: number): Promise<ArenaPayload | null>
     .in("user_id", players.map((p) => p.id))
     .gte("local_date", fromDate).lte("local_date", today);
 
+  const { data: goalRows } = await supabase
+    .from("monthly_goals").select("*")
+    .in("user_id", players.map((p) => p.id))
+    .eq("month", today.slice(0, 8) + "01");
+
   return {
     today,
     from_date: fromDate,
@@ -129,6 +136,7 @@ async function loadArenaLegacy(windowDays: number): Promise<ArenaPayload | null>
     challenge,
     players,
     totals: (totalRows ?? []) as Record<string, unknown>[],
+    goals: (goalRows ?? []) as MonthlyGoal[],
   };
 }
 
@@ -139,6 +147,7 @@ interface ArenaPayload {
   challenge: Challenge | null;
   players: Profile[];
   totals: Record<string, unknown>[];
+  goals?: MonthlyGoal[];
 }
 
 /**
@@ -201,12 +210,18 @@ export async function loadArena(windowDays = 30): Promise<Arena | null> {
   // targets. This is what makes the head-to-head fair across different
   // bodies — see the mode note in src/lib/scoring.ts.
   const drafts = profiles.map((profile) => {
+    // A stated goal outranks the formula: if they have said they want 150 g
+    // of protein a day, that is what they should be scored against.
     const derived = deriveTargets(profile);
-    const targets = derived
+    const theirGoals = (payload!.goals ?? []).filter((g) => g.user_id === profile.id);
+    const adjusted = derived
+      ? applyGoalsToTargets(derived, theirGoals, profile.weight_kg, daysInMonthOf(today))
+      : null;
+    const targets = adjusted
       ? {
-          burnTarget: derived.burnTarget,
-          proteinTarget: derived.proteinTarget,
-          kcalTarget: derived.kcalTarget,
+          burnTarget: adjusted.burnTarget,
+          proteinTarget: adjusted.proteinTarget,
+          kcalTarget: adjusted.kcalTarget,
         }
       : null;
     const mine = byUser.get(profile.id) ?? new Map<string, DailyTotals>();
@@ -254,7 +269,7 @@ export async function loadArena(windowDays = 30): Promise<Arena | null> {
 
   players.sort((a, b) => (b.isMe ? 1 : 0) - (a.isMe ? 1 : 0) || b.points - a.points);
 
-  return { me, challenge: payload.challenge ?? null, players, days, today };
+  return { me, challenge: payload.challenge ?? null, players, days, today, goals: payload.goals ?? [] };
 }
 
 export function rivals(arena: Arena): PlayerView[] {

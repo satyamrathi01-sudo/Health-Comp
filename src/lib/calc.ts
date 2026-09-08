@@ -162,7 +162,7 @@ export function dateRange(from: string, to: string): string[] {
  * `limit` entries are ceilings to stay under; `aim` entries are floors.
  * ===================================================================== */
 
-import type { Micros, Sex as SexT } from "./types";
+import type { Micros, MonthlyGoal, Sex as SexT } from "./types";
 
 export interface MicroRef {
   key: keyof Micros;
@@ -219,4 +219,86 @@ export function microVerdict(value: number, ref: MicroRef, sex: SexT | null): Mi
   if (ref.mode === "limit") return r > 1 ? "over" : "good";
   if (r < 0.6) return "low";
   return "good";
+}
+
+/* =====================================================================
+ * Goals steer the targets.
+ *
+ * A monthly goal is a statement of intent, so where one overlaps a derived
+ * target it wins: if you have said you want 150 g of protein a day, that is
+ * what you should be scored against, not the 1.8 g/kg the formula produced.
+ * Goals that do not map onto a daily number (workout days, average score,
+ * free-text promises) steer the coach instead — see /api/coach.
+ * ===================================================================== */
+
+export interface GoalLike {
+  metric: MonthlyGoal["metric"];
+  target_value: number | null;
+  done?: boolean;
+}
+
+export interface TargetSource {
+  protein: "profile" | "goal";
+  burn: "profile" | "goal";
+  kcal: "profile" | "goal";
+}
+
+export interface GoalAdjustedTargets extends DerivedTargets {
+  source: TargetSource;
+}
+
+export function applyGoalsToTargets(
+  base: DerivedTargets,
+  goals: GoalLike[],
+  currentWeightKg: number | null,
+  daysInMonth = 30,
+): GoalAdjustedTargets {
+  const out: GoalAdjustedTargets = {
+    ...base,
+    source: { protein: "profile", burn: "profile", kcal: "profile" },
+  };
+
+  for (const goal of goals) {
+    const value = Number(goal.target_value);
+    if (!Number.isFinite(value) || value <= 0) continue;
+
+    switch (goal.metric) {
+      case "avg_protein_g":
+        out.proteinTarget = Math.round(value);
+        out.source.protein = "goal";
+        break;
+
+      case "total_kcal_burned":
+        // A month-long total only means anything per day.
+        out.burnTarget = Math.max(100, Math.round(value / Math.max(1, daysInMonth)));
+        out.source.burn = "goal";
+        break;
+
+      case "weight_kg": {
+        // A target weight implies a direction; make sure the calorie aim
+        // actually points that way rather than contradicting the goal.
+        if (!currentWeightKg) break;
+        if (value < currentWeightKg - 0.5) {
+          out.kcalTarget = Math.max(1200, Math.min(out.kcalTarget, base.tdee - 400));
+          out.source.kcal = "goal";
+        } else if (value > currentWeightKg + 0.5) {
+          out.kcalTarget = Math.max(out.kcalTarget, base.tdee + 250);
+          out.source.kcal = "goal";
+        }
+        break;
+      }
+
+      // workout_days, avg_score and custom have no daily equivalent; they are
+      // passed to the coach as intent instead.
+      default:
+        break;
+    }
+  }
+
+  return out;
+}
+
+export function daysInMonthOf(isoDate: string): number {
+  const d = new Date(isoDate + "T00:00:00Z");
+  return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 0)).getUTCDate();
 }

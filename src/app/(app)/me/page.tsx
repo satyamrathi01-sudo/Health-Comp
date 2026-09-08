@@ -1,6 +1,6 @@
 import { loadArena, mine, rival } from "@/lib/data";
 import { createClient } from "@/lib/supabase/server";
-import { ageFrom, deriveTargets } from "@/lib/calc";
+import { ageFrom, applyGoalsToTargets, daysInMonthOf, deriveTargets } from "@/lib/calc";
 import { DataRow, Metric, PageHeader, Section } from "@/components/ui";
 import Disclosure from "@/components/Disclosure";
 import InviteCard from "@/components/InviteCard";
@@ -17,7 +17,13 @@ export default async function MePage() {
   const supabase = await createClient();
   const me = mine(arena);
   const them = rival(arena);
-  const targets = deriveTargets(arena.me);
+  const base = deriveTargets(arena.me);
+  const myGoals = arena.goals.filter((g) => g.user_id === arena.me.id);
+  const targets = base
+    ? applyGoalsToTargets(base, myGoals, arena.me.weight_kg, daysInMonthOf(arena.today))
+    : null;
+  const fromGoal = (k: "protein" | "burn" | "kcal") =>
+    targets?.source[k] === "goal" ? "from your goal" : undefined;
 
   const { data: weighIns } = await supabase
     .from("weigh_ins").select("local_date, weight_kg")
@@ -83,9 +89,14 @@ export default async function MePage() {
               <div className="hair" />
               <DataRow label="Maintenance" value={`${targets.tdee} kcal`} sub="with your activity level" />
               <div className="hair" />
-              <DataRow label="Intake aim" value={`${targets.kcalTarget} kcal`} sub={`for ${arena.me.goal}`} />
+              <DataRow label="Intake aim" value={`${targets.kcalTarget} kcal`}
+                sub={fromGoal("kcal") ?? `for ${arena.me.goal}`} />
               <div className="hair" />
-              <DataRow label="Protein aim" value={`${targets.proteinTarget} g`} sub="per day" />
+              <DataRow label="Protein aim" value={`${targets.proteinTarget} g`}
+                sub={fromGoal("protein") ?? "per day"} />
+              <div className="hair" />
+              <DataRow label="Burn aim" value={`${targets.burnTarget} kcal`}
+                sub={fromGoal("burn") ?? "from exercise, per day"} />
               <p className="hair pt-3 text-[0.65rem] leading-relaxed text-mist-600">
                 Your score is measured against these, not against your rival&apos;s raw
                 numbers — so a bigger body has to do more to earn the same points.

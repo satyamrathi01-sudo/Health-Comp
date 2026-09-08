@@ -120,6 +120,12 @@ export interface AdvicePoint {
   /** add | reduce | keep | train | rest — drives the icon and tone */
   kind: "add" | "reduce" | "keep" | "train" | "rest";
   text: string;
+  /** Which part of the score this would move. */
+  component?: "burn" | "protein" | "calories" | "minutes" | "logging" | "sleep" | "micros" | "none";
+  /** Size of the change, in that component's unit. Negative means "less". */
+  amount?: number;
+  /** Points this would add, computed by the server. */
+  points?: number;
 }
 
 export interface DailyAdvice {

@@ -571,7 +571,14 @@ begin
                    (select jsonb_agg(to_jsonb(t))
                       from public.daily_totals t
                      where t.user_id = any(member_ids)
-                       and t.local_date between from_date and today), '[]'::jsonb)
+                       and t.local_date between from_date and today), '[]'::jsonb),
+    -- This month's goals, for everyone visible. They override the derived
+    -- targets where they overlap, so scoring has to see them.
+    'goals',     coalesce(
+                   (select jsonb_agg(to_jsonb(g))
+                      from public.monthly_goals g
+                     where g.user_id = any(member_ids)
+                       and g.month = date_trunc('month', today)::date), '[]'::jsonb)
   );
 end;
 $$;

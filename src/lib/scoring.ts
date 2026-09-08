@@ -376,3 +376,71 @@ export function compareScores(mine: DayScore, theirs: DayScore): ScoreGap {
     drops: ordered.filter((l) => l.delta < 0),
   };
 }
+
+/* =====================================================================
+ * What a suggestion is actually worth.
+ *
+ * Rather than estimating, this re-scores the day with the change applied
+ * and takes the difference. That way every cap, guard and band is honoured
+ * automatically: adding 300 kcal of burn is worth nothing if you already
+ * maxed that line, and the number shown can never contradict the score.
+ * ===================================================================== */
+
+export type ImpactComponent =
+  | "burn" | "protein" | "calories" | "minutes" | "logging" | "sleep" | "micros" | "none";
+
+export interface Impact {
+  component: ImpactComponent;
+  /** In the component's own unit; may be negative (e.g. eat 300 kcal less). */
+  amount: number;
+}
+
+/** The fields scoreDay actually reads, so no zeroed row needs constructing. */
+function readable(t: DailyTotals | null): DailyTotals {
+  return {
+    kcal_in: t?.kcal_in ?? 0,
+    kcal_out: t?.kcal_out ?? 0,
+    protein_g: t?.protein_g ?? 0,
+    active_minutes: t?.active_minutes ?? 0,
+    meals: t?.meals ?? 0,
+    sessions: t?.sessions ?? 0,
+    is_rest_day: t?.is_rest_day ?? false,
+  } as DailyTotals;
+}
+
+function withImpact(t: DailyTotals | null, impact: Impact): DailyTotals {
+  const base = readable(t);
+  const amount = Number.isFinite(impact.amount) ? impact.amount : 0;
+
+  switch (impact.component) {
+    case "burn":
+      return { ...base, kcal_out: Math.max(0, base.kcal_out + amount), sessions: Math.max(1, base.sessions) };
+    case "minutes":
+      return { ...base, active_minutes: Math.max(0, base.active_minutes + amount), sessions: Math.max(1, base.sessions) };
+    case "protein":
+      return { ...base, protein_g: Math.max(0, base.protein_g + amount), meals: Math.max(1, base.meals) };
+    case "calories":
+      return { ...base, kcal_in: Math.max(0, base.kcal_in + amount), meals: Math.max(1, base.meals) };
+    case "logging":
+      return { ...base, meals: Math.max(1, base.meals), sessions: Math.max(1, base.sessions) };
+    // Sleep and micronutrients are tracked but not scored, so they are worth
+    // zero points by construction — and saying so is more honest than
+    // inventing a number.
+    default:
+      return base;
+  }
+}
+
+export function projectedGain(
+  impact: Impact,
+  totals: DailyTotals | null,
+  streakDays: number,
+  targets: ScoreTargets | null,
+): number {
+  if (impact.component === "sleep" || impact.component === "micros" || impact.component === "none") {
+    return 0;
+  }
+  const before = scoreDay(readable(totals), "projection", streakDays, targets);
+  const after = scoreDay(withImpact(totals, impact), "projection", streakDays, targets);
+  return round1(after.total - before.total);
+}

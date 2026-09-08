@@ -474,8 +474,19 @@ const ADVICE_SCHEMA: SchemaNode = {
             type: "STRING",
             description: "One concrete sentence, max ~110 characters. Name real foods or actions.",
           },
+          component: {
+            type: "STRING",
+            enum: ["burn", "protein", "calories", "minutes", "logging", "sleep", "micros", "none"],
+            description: "Which part of the score this would move, if any.",
+          },
+          amount: {
+            type: "NUMBER",
+            description:
+              "Size of the change in that component's own unit: kcal for burn and calories, " +
+              "grams for protein, minutes for minutes. NEGATIVE to eat less. 0 when not applicable.",
+          },
         },
-        required: ["kind", "text"],
+        required: ["kind", "text", "component", "amount"],
       },
     },
   },
@@ -499,6 +510,16 @@ Give three to five pointers for TOMORROW. Rules:
 - Micronutrients are worth a point only when notably low against the stated target, and
   only with a real food fix (iron -> ragi, dates, spinach with lemon; B12 -> curd, milk,
   eggs; vitamin D -> sunlight or a supplement conversation).
+- THEIR GOALS COME FIRST. If a goal is stated below, every pointer should serve it. A
+  person chasing 150 g of protein wants protein pointers; someone chasing 20 training
+  days wants to be told to train. Do not push a generic priority over a stated goal.
+- Quantify each pointer with the component and amount fields so the app can price it: "add 150 g
+  of paneer" is component "protein", amount 30. "Walk 30 minutes" is component "minutes",
+  amount 30 (use "burn" with a kcal amount instead if you mean the energy). "Cut the
+  evening namkeen" is component "calories" with a NEGATIVE amount. Sleep and
+  micronutrient pointers use "sleep" or "micros" with amount 0 — the app knows those do
+  not move the score and will say so. Be realistic: the amount is what one ordinary day's
+  change would actually deliver.
 - Tone: direct, warm, no cheerleading, no emoji, no exclamation marks. Address them as
   "you". This is a friendly competition between two friends, not a clinic.
 - This is general fitness guidance, not medical advice. Do not diagnose, do not name
@@ -513,6 +534,9 @@ export interface AdviceResult {
 }
 
 const ADVICE_KINDS = ["add", "reduce", "keep", "train", "rest"] as const;
+const IMPACT_COMPONENTS = [
+  "burn", "protein", "calories", "minutes", "logging", "sleep", "micros", "none",
+] as const;
 
 export async function generateAdvice(summary: string): Promise<AdviceResult> {
   const raw = await generate<AdviceResult>(ADVICE_PROMPT, summary, ADVICE_SCHEMA);
@@ -524,6 +548,12 @@ export async function generateAdvice(summary: string): Promise<AdviceResult> {
       .map((p) => ({
         kind: ADVICE_KINDS.includes(p.kind) ? p.kind : "keep",
         text: String(p.text).slice(0, 200),
+        component: IMPACT_COMPONENTS.includes(p.component as (typeof IMPACT_COMPONENTS)[number])
+          ? p.component
+          : "none",
+        // Clamped: a hallucinated 5000 g of protein must not produce a
+        // ludicrous projection.
+        amount: Math.max(-4000, Math.min(4000, num(p.amount, 4000) * (Number(p.amount) < 0 ? -1 : 1))),
       })),
   };
 }
