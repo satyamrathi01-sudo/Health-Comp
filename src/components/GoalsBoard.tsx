@@ -15,13 +15,21 @@ const METRICS: { value: MonthlyGoal["metric"]; label: string; unit: string; hint
   { value: "avg_score", label: "Average score", unit: "pts", hint: "Mean daily score this month" },
 ];
 
+export interface GoalSuggestion {
+  title: string;
+  metric: MonthlyGoal["metric"];
+  target_value: number | null;
+}
+
 export default function GoalsBoard({
-  userId, month, goals, progress,
+  userId, month, goals, progress, suggestions = [],
 }: {
   userId: string;
   month: string;
   goals: MonthlyGoal[];
   progress: Record<string, number | null>;
+  /** Personalised starting points, shown only while the month is empty. */
+  suggestions?: GoalSuggestion[];
 }) {
   const router = useRouter();
   const supabase = createClient();
@@ -49,6 +57,21 @@ export default function GoalsBoard({
     setBusy(false);
     if (error) { setError(error.message); return; }
     setTitle(""); setTarget(""); setMetric("custom"); setAdding(false);
+    router.refresh();
+  }
+
+  async function addSuggestion(s: GoalSuggestion) {
+    setBusy(true);
+    setError(null);
+    const { error } = await supabase.from("monthly_goals").insert({
+      user_id: userId,
+      month,
+      title: s.title,
+      metric: s.metric,
+      target_value: s.target_value,
+    });
+    setBusy(false);
+    if (error) { setError(error.message); return; }
     router.refresh();
   }
 
@@ -114,11 +137,32 @@ export default function GoalsBoard({
       )}
 
       {goals.length === 0 && !adding ? (
-        <EmptyState
-          icon="🎯"
-          title="No goals set for this month"
-          body="Write down what you want by month end. Your friend sees it too — that's the point."
-        />
+        <div>
+          <EmptyState
+            icon="○"
+            title="No goals this month"
+            body="A goal changes what you're scored against, not just what you're reminded of."
+          />
+          {suggestions.length > 0 && (
+            <div className="mt-4">
+              <p className="eyebrow mb-2.5">Start with one of these</p>
+              <div className="surface px-5">
+                {suggestions.map((sg, i) => (
+                  <button
+                    key={sg.title}
+                    disabled={busy}
+                    onClick={() => addSuggestion(sg)}
+                    className={`flex w-full items-center gap-3 py-3.5 text-left disabled:opacity-50 ${i > 0 ? "hair" : ""}`}
+                  >
+                    <span className="min-w-0 flex-1 text-sm text-mist-200">{sg.title}</span>
+                    <span className="shrink-0 text-xs font-semibold text-lime-glow">Add</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+          {error && <p className="mt-3 text-xs text-danger">{error}</p>}
+        </div>
       ) : (
         <div className="surface px-5">
           {goals.map((goal, idx) => {

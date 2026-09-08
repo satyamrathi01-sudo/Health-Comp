@@ -24,17 +24,27 @@ export default async function OneOnOnePage({ params }: { params: Promise<{ id: s
   const firstName = them.profile.display_name.split(" ")[0];
 
   // Head-to-head between exactly these two, not "best rival that day".
+  const firstDay = arena.challenge
+    ? [arena.challenge.start_date, arena.days[0]].sort().reverse()[0]
+    : arena.days[0];
+
   let wins = 0, losses = 0, draws = 0;
-  const fixtures: { day: string; a: number; b: number; outcome: string }[] = [];
+  const fixtures: { day: string; a: number; b: number; outcome: string; played: boolean }[] = [];
   for (const day of arena.days) {
+    if (day < firstDay) continue;
     const a = me.scores.get(day)!;
     const b = them.scores.get(day)!;
-    if (!a.logged && !b.logged) continue;
-    const outcome = dayOutcome(a, b);
-    if (outcome === "win") wins++;
-    else if (outcome === "loss") losses++;
-    else if (outcome === "tie") draws++;
-    fixtures.push({ day, a: a.total, b: b.total, outcome });
+    const played = a.logged || b.logged;
+    if (played) {
+      const outcome = dayOutcome(a, b);
+      if (outcome === "win") wins++;
+      else if (outcome === "loss") losses++;
+      else if (outcome === "tie") draws++;
+      fixtures.push({ day, a: a.total, b: b.total, outcome, played });
+    } else {
+      // Kept, dimmed: a missed day is information, not an absence.
+      fixtures.push({ day, a: 0, b: 0, outcome: "none", played });
+    }
   }
   fixtures.reverse();
 
@@ -85,7 +95,8 @@ export default async function OneOnOnePage({ params }: { params: Promise<{ id: s
         ) : (
           <div className="surface px-5">
             {fixtures.map((f, i) => (
-              <div key={f.day} className={`flex items-center gap-3 ${i > 0 ? "hair py-3" : "py-3"}`}>
+              <div key={f.day}
+                className={`flex items-center gap-3 ${i > 0 ? "hair py-3" : "py-3"} ${f.played ? "" : "opacity-40"}`}>
                 <span className="w-[5.5rem] shrink-0 text-[0.7rem] text-mist-600">
                   {f.day === arena.today
                     ? "Today"
@@ -93,9 +104,14 @@ export default async function OneOnOnePage({ params }: { params: Promise<{ id: s
                         weekday: "short", day: "numeric", month: "short",
                       })}
                 </span>
+                {!f.played && (
+                  <span className="flex-1 text-center text-[0.7rem] text-mist-600">not logged</span>
+                )}
+                {f.played && (
                 <span className="tnum w-8 text-right text-sm font-bold" style={{ color: YOU }}>
                   {Math.round(f.a)}
-                </span>
+                </span>)}
+                {f.played && (<>
                 <div className="flex h-[3px] flex-1 overflow-hidden rounded-full bg-ink-800">
                   <div style={{ width: `${f.a + f.b > 0 ? (f.a / (f.a + f.b)) * 100 : 50}%`, background: YOU }} />
                   <div className="flex-1" style={{ background: THEM }} />
@@ -110,7 +126,7 @@ export default async function OneOnOnePage({ params }: { params: Promise<{ id: s
                   }}
                 >
                   {f.outcome === "win" ? "W" : f.outcome === "loss" ? "L" : "D"}
-                </span>
+                </span></>)}
               </div>
             ))}
           </div>

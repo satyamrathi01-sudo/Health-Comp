@@ -1,7 +1,8 @@
 import { loadArena, mine, rival } from "@/lib/data";
 import { createClient } from "@/lib/supabase/server";
 import { EmptyState, PageHeader, Section } from "@/components/ui";
-import GoalsBoard from "@/components/GoalsBoard";
+import GoalsBoard, { type GoalSuggestion } from "@/components/GoalsBoard";
+import { applyGoalsToTargets, daysInMonthOf, deriveTargets } from "@/lib/calc";
 import type { MonthlyGoal } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -86,6 +87,42 @@ export default async function GoalsPage() {
   const myGoals = goals.filter((g) => g.user_id === arena.me.id);
   const theirGoals = them ? goals.filter((g) => g.user_id === them.profile.id) : [];
 
+  // Anchored to their own numbers, so a suggestion is a real stretch rather
+  // than a round number pulled out of the air.
+  const base = deriveTargets(arena.me);
+  const daysThisMonth = daysInMonthOf(arena.today);
+  const suggestions: GoalSuggestion[] = base
+    ? [
+        {
+          title: `Average ${base.proteinTarget + 10} g protein a day`,
+          metric: "avg_protein_g",
+          target_value: base.proteinTarget + 10,
+        },
+        {
+          title: `Train on ${Math.round(daysThisMonth * 0.6)} days this month`,
+          metric: "workout_days",
+          target_value: Math.round(daysThisMonth * 0.6),
+        },
+        {
+          title: `Burn ${(base.burnTarget * daysThisMonth).toLocaleString()} kcal this month`,
+          metric: "total_kcal_burned",
+          target_value: base.burnTarget * daysThisMonth,
+        },
+        {
+          title: "Average 75 points a day",
+          metric: "avg_score",
+          target_value: 75,
+        },
+        ...(arena.me.weight_kg && arena.me.goal === "cut"
+          ? [{
+              title: `Reach ${Math.round((Number(arena.me.weight_kg) - 2) * 10) / 10} kg`,
+              metric: "weight_kg" as const,
+              target_value: Math.round((Number(arena.me.weight_kg) - 2) * 10) / 10,
+            }]
+          : []),
+      ]
+    : [];
+
   return (
     <div className="rise space-y-6">
       <PageHeader title="Goals" subtitle={monthLabel} />
@@ -95,6 +132,7 @@ export default async function GoalsPage() {
         month={monthStart}
         goals={myGoals}
         progress={progressByGoal}
+        suggestions={suggestions}
       />
 
       {them && (

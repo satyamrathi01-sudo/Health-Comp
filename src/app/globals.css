@@ -41,6 +41,10 @@ html {
 }
 
 body {
+  /* 100dvh, not 100%: with viewport-fit=cover, a percentage height resolves
+     against a containing block that does not match the visible area on iOS,
+     which leaves real scrollable dead space below short pages. */
+  min-height: 100dvh;
   background: var(--color-void);
   color: var(--color-mist-200);
   font-family: var(--font-sans);

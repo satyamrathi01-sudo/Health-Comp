@@ -30,9 +30,13 @@ export default async function VersusPage() {
     );
   }
 
-  const days = [...arena.days].reverse().filter(
-    (d) => me.scores.get(d)!.logged || them.scores.get(d)!.logged,
-  );
+  // Every day since the challenge began (bounded by the loaded window), so
+  // missed days show as gaps rather than vanishing. A calendar you can see
+  // holes in is more useful than a list that hides them.
+  const firstDay = arena.challenge
+    ? [arena.challenge.start_date, arena.days[0]].sort().reverse()[0]
+    : arena.days[0];
+  const days = [...arena.days].filter((d) => d >= firstDay).reverse();
 
   const subtitle = arena.challenge
     ? arena.challenge.name
@@ -124,6 +128,12 @@ export default async function VersusPage() {
                 first={i === 0}
               />
             ))}
+            {days.length === 0 && (
+              <p className="py-6 text-center text-xs text-mist-600">
+                The challenge starts {new Date(arena.challenge!.start_date + "T00:00:00")
+                  .toLocaleDateString("en-GB", { day: "numeric", month: "long" })}.
+              </p>
+            )}
           </div>
         )}
       </Section>
@@ -156,7 +166,17 @@ function DayRow({
     : new Date(day + "T00:00:00").toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short" });
 
   const diff = a.total - b.total;
+  const played = a.logged || b.logged;
   const result = Math.abs(diff) < 0.05 ? "draw" : diff > 0 ? "won" : "lost";
+
+  if (!played) {
+    return (
+      <div className={`flex items-center gap-3 ${first ? "py-3" : "hair py-3"} opacity-40`}>
+        <span className="w-[5.5rem] shrink-0 text-[0.7rem] text-mist-600">{label}</span>
+        <span className="flex-1 text-center text-[0.7rem] text-mist-600">not logged</span>
+      </div>
+    );
+  }
 
   return (
     <div className={`flex items-center gap-3 ${first ? "py-3" : "hair py-3"}`}>
