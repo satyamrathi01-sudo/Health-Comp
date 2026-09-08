@@ -16,6 +16,7 @@ export interface Profile {
   goal: Goal;
   timezone: string;
   onboarded: boolean;
+  active_challenge_id: string | null;
   created_at: string;
 }
 
@@ -152,6 +153,20 @@ export interface DailyTotals extends Micros {
   is_rest_day: boolean;
   sleep_hours: number | null;
   sleep_quality: SleepQuality | null;
+}
+
+/** A challenge as it appears in the switcher: named by whoever created it. */
+export interface ChallengeSummary {
+  id: string;
+  name: string;
+  invite_code: string;
+  start_date: string;
+  end_date: string;
+  created_by: string;
+  is_mine: boolean;
+  owner_name: string;
+  owner_emoji: string;
+  member_count: number;
 }
 
 export interface Challenge {

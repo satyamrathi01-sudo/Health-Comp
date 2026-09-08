@@ -723,3 +723,143 @@ end;
 $$;
 
 grant execute on function public.get_arena(integer) to authenticated;
+
+-- =====================================================================
+-- v7 — many challenges per person.
+--
+-- Everyone can run their own challenge and join other people's, so a user
+-- is now in N of them at once and picks which one they are looking at.
+--
+-- Visibility needs NO change: can_see() already requires a SHARED challenge
+-- where one of the pair created it. So if I run challenge A with X, and X
+-- separately runs challenge C with Z, X sees both of us and Z and I never
+-- see each other. That is exactly the intent, and it falls out of the
+-- existing rule rather than needing a new one.
+-- =====================================================================
+
+alter table public.profiles
+  add column if not exists active_challenge_id uuid
+    references public.challenges(id) on delete set null;
+
+-- get_arena resolves which challenge to report on, in this order:
+--   1. the challenge_id passed in
+--   2. profiles.active_challenge_id
+--   3. most recently joined
+-- Each candidate is checked for membership first, so a stale or forged id
+-- simply falls through instead of leaking someone else's challenge.
+create or replace function public.get_arena(
+  days integer default 30,
+  challenge_id uuid default null
+)
+returns jsonb
+language plpgsql
+stable
+security invoker
+set search_path = public
+as $$
+declare
+  uid        uuid := auth.uid();
+  me_row     public.profiles;
+  ch         public.challenges;
+  member_ids uuid[];
+  today      date;
+  from_date  date;
+  wanted     uuid;
+begin
+  if uid is null then
+    return null;
+  end if;
+
+  select * into me_row from public.profiles where id = uid;
+  if not found then
+    return null;
+  end if;
+
+  today     := (now() at time zone coalesce(me_row.timezone, 'Asia/Kolkata'))::date;
+  from_date := today - (greatest(coalesce(days, 30), 1) - 1);
+
+  wanted := coalesce(challenge_id, me_row.active_challenge_id);
+
+  if wanted is not null then
+    select c.* into ch
+    from public.challenge_members m
+    join public.challenges c on c.id = m.challenge_id
+    where m.user_id = uid and c.id = wanted;
+  end if;
+
+  -- Nothing asked for, or asked for something they are not in.
+  if ch.id is null then
+    select c.* into ch
+    from public.challenge_members m
+    join public.challenges c on c.id = m.challenge_id
+    where m.user_id = uid
+    order by m.joined_at desc
+    limit 1;
+  end if;
+
+  if ch.id is not null then
+    select array_agg(m.user_id) into member_ids
+      from public.challenge_members m
+     where m.challenge_id = ch.id;
+  end if;
+
+  if member_ids is null then
+    member_ids := array[uid];
+  end if;
+
+  return jsonb_build_object(
+    'today',     today,
+    'from_date', from_date,
+    'me',        to_jsonb(me_row),
+    'challenge', case when ch.id is null then null else to_jsonb(ch) end,
+    'players',   coalesce(
+                   (select jsonb_agg(to_jsonb(p) order by p.created_at)
+                      from public.profiles p
+                     where p.id = any(member_ids)), '[]'::jsonb),
+    'totals',    coalesce(
+                   (select jsonb_agg(to_jsonb(t))
+                      from public.daily_totals t
+                     where t.user_id = any(member_ids)
+                       and t.local_date between from_date and today), '[]'::jsonb),
+    'goals',     coalesce(
+                   (select jsonb_agg(to_jsonb(g))
+                      from public.monthly_goals g
+                     where g.user_id = any(member_ids)
+                       and g.month = date_trunc('month', today)::date), '[]'::jsonb),
+    'today_food', coalesce(
+                   (select jsonb_agg(to_jsonb(f) order by f.logged_at)
+                      from public.food_logs f
+                     where f.user_id = uid and f.local_date = today), '[]'::jsonb),
+    'today_workouts', coalesce(
+                   (select jsonb_agg(to_jsonb(w) order by w.logged_at)
+                      from public.workout_logs w
+                     where w.user_id = uid and w.local_date = today), '[]'::jsonb),
+    -- Every challenge this person belongs to, for the switcher. Named by
+    -- whoever created it, which is how you tell two "60-Day Clash" apart.
+    'my_challenges', coalesce(
+                   (select jsonb_agg(jsonb_build_object(
+                              'id',           c.id,
+                              'name',         c.name,
+                              'invite_code',  c.invite_code,
+                              'start_date',   c.start_date,
+                              'end_date',     c.end_date,
+                              'created_by',   c.created_by,
+                              'is_mine',      c.created_by = uid,
+                              'owner_name',   coalesce(op.display_name, 'Someone'),
+                              'owner_emoji',  coalesce(op.avatar_emoji, '🔥'),
+                              'member_count', (select count(*) from public.challenge_members mm
+                                                where mm.challenge_id = c.id)
+                            ) order by m2.joined_at desc)
+                      from public.challenge_members m2
+                      join public.challenges c on c.id = m2.challenge_id
+                      left join public.profiles op on op.id = c.created_by
+                     where m2.user_id = uid), '[]'::jsonb)
+  );
+end;
+$$;
+
+grant execute on function public.get_arena(integer, uuid) to authenticated;
+
+-- The single-argument form is what older deploys call; drop it so there is
+-- exactly one get_arena and no ambiguity about which overload runs.
+drop function if exists public.get_arena(integer);

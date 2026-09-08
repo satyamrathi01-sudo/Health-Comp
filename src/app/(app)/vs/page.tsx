@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { mine, requireArena, rival, rivals, type PlayerView } from "@/lib/data";
 import { EmptyState, PageHeader, Section } from "@/components/ui";
+import ChallengeSwitcher from "@/components/ChallengeSwitcher";
 import type { DayScore } from "@/lib/scoring";
 
 export const dynamic = "force-dynamic";
@@ -19,7 +20,12 @@ export default async function VersusPage() {
   if (!them) {
     return (
       <div className="rise">
-        <PageHeader title="Versus" subtitle="Nobody to beat yet" />
+          <PageHeader title="Versus" subtitle="Nobody to beat yet" />
+        {arena.myChallenges.length > 1 && (
+          <div className="mb-6">
+            <ChallengeSwitcher challenges={arena.myChallenges} activeId={arena.challenge?.id ?? null} />
+          </div>
+        )}
         <EmptyState
           icon="○"
           title="Your rival hasn't joined"
@@ -44,6 +50,10 @@ export default async function VersusPage() {
   return (
     <div className="rise space-y-8">
       <PageHeader title="Versus" subtitle={subtitle} />
+
+      {arena.myChallenges.length > 1 && (
+        <ChallengeSwitcher challenges={arena.myChallenges} activeId={arena.challenge?.id ?? null} />
+      )}
 
       {/* ---------- the standing ---------- */}
       {others.length === 1 ? (

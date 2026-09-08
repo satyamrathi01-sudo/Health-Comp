@@ -3,7 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 import { ageFrom, applyGoalsToTargets, daysInMonthOf, deriveTargets } from "@/lib/calc";
 import { DataRow, Metric, PageHeader, Section } from "@/components/ui";
 import Disclosure from "@/components/Disclosure";
-import InviteCard from "@/components/InviteCard";
+import ChallengeManager from "@/components/ChallengeManager";
 import WeighIn from "@/components/WeighIn";
 import SignOut from "@/components/SignOut";
 
@@ -72,11 +72,12 @@ export default async function MePage() {
         />
       </Section>
 
-      <Section title="Your challenge">
-        <InviteCard
-          challenge={arena.challenge}
-          rivalName={them?.profile.display_name ?? null}
-          hasRival={Boolean(them)}
+      <Section title={`Your challenges (${arena.myChallenges.length})`}>
+        <ChallengeManager
+          userId={arena.me.id}
+          timezone={arena.me.timezone}
+          challenges={arena.myChallenges}
+          activeId={arena.challenge?.id ?? null}
         />
       </Section>
 

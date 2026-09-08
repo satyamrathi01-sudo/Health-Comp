@@ -4,7 +4,7 @@ import { createClient, supabaseConfigured } from "./supabase/server";
 import { addDays, applyGoalsToTargets, dateRange, daysInMonthOf, deriveTargets, localDate } from "./calc";
 import { dayOutcome, scoreDay, streakEndingAt, type DayScore } from "./scoring";
 import { computeRecovery, type Recovery } from "./recovery";
-import { emptyDailyTotals, MICRO_KEYS, type Challenge, type DailyTotals, type FoodLog, type MonthlyGoal, type Profile, type SleepQuality, type WorkoutLog } from "./types";
+import { emptyDailyTotals, MICRO_KEYS, type Challenge, type ChallengeSummary, type DailyTotals, type FoodLog, type MonthlyGoal, type Profile, type SleepQuality, type WorkoutLog } from "./types";
 
 export interface PlayerView {
   profile: Profile;
@@ -33,6 +33,8 @@ export interface Arena {
   /** My own entries for today, so the dashboard needs no follow-up query. */
   todayFood: FoodLog[];
   todayWorkouts: WorkoutLog[];
+  /** Every challenge I belong to, for the switcher. */
+  myChallenges: ChallengeSummary[];
 }
 
 function num(v: unknown): number {
@@ -108,6 +110,7 @@ async function loadArenaLegacy(windowDays: number): Promise<ArenaPayload | null>
   const { data: memberships } = await supabase
     .from("challenge_members")
     .select("challenge_id, challenges(*)")
+    .eq("user_id", me.id)
     .order("joined_at", { ascending: false })
     .limit(1);
 
@@ -136,6 +139,8 @@ async function loadArenaLegacy(windowDays: number): Promise<ArenaPayload | null>
     .in("user_id", players.map((p) => p.id))
     .eq("month", today.slice(0, 8) + "01");
 
+  const allChallenges = await fetchMyChallenges(supabase, me);
+
   const [{ data: foodRows }, { data: workoutRows }] = await Promise.all([
     supabase.from("food_logs").select("*")
       .eq("user_id", me.id).eq("local_date", today).order("logged_at", { ascending: true }),
@@ -153,7 +158,64 @@ async function loadArenaLegacy(windowDays: number): Promise<ArenaPayload | null>
     goals: (goalRows ?? []) as MonthlyGoal[],
     today_food: (foodRows ?? []) as FoodLog[],
     today_workouts: (workoutRows ?? []) as WorkoutLog[],
+    my_challenges: allChallenges,
   };
+}
+
+
+/**
+ * Every challenge the caller belongs to, with owner names for the switcher.
+ *
+ * Used both by the legacy path and as a backfill when get_arena predates v7:
+ * that call SUCCEEDS and simply omits the field, so detecting a missing
+ * function is not enough — the missing field has to be detected too.
+ */
+async function fetchMyChallenges(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  me: Profile,
+): Promise<ChallengeSummary[]> {
+  // Filter to MY membership rows. Without this, RLS also returns my rivals'
+  // rows in the same challenges, and each one embeds the same challenge —
+  // so a two-person challenge appeared twice and a three-person one thrice.
+  const { data: memberships } = await supabase
+    .from("challenge_members").select("challenge_id, challenges(*)")
+    .eq("user_id", me.id)
+    .order("joined_at", { ascending: false });
+
+  const rows = (memberships ?? [])
+    .map((r) => {
+      const raw = (r as Record<string, unknown>).challenges;
+      return (Array.isArray(raw) ? raw[0] : raw) as Challenge | null;
+    })
+    .filter((c): c is Challenge => Boolean(c));
+
+  if (!rows.length) return [];
+
+  const ownerIds = [...new Set(rows.map((c) => c.created_by))];
+  const [{ data: owners }, { data: counts }] = await Promise.all([
+    supabase.from("profiles").select("id, display_name, avatar_emoji").in("id", ownerIds),
+    supabase.from("challenge_members").select("challenge_id").in("challenge_id", rows.map((c) => c.id)),
+  ]);
+
+  const ownerById = new Map(
+    (owners ?? []).map((o) => [String(o.id), o as { display_name: string; avatar_emoji: string }]),
+  );
+
+  return rows.map((c) => {
+    const owner = ownerById.get(c.created_by);
+    return {
+      id: c.id,
+      name: c.name,
+      invite_code: c.invite_code,
+      start_date: c.start_date,
+      end_date: c.end_date,
+      created_by: c.created_by,
+      is_mine: c.created_by === me.id,
+      owner_name: c.created_by === me.id ? me.display_name : owner?.display_name ?? "Someone",
+      owner_emoji: owner?.avatar_emoji ?? "🔥",
+      member_count: (counts ?? []).filter((m) => m.challenge_id === c.id).length || 1,
+    };
+  });
 }
 
 interface ArenaPayload {
@@ -166,6 +228,7 @@ interface ArenaPayload {
   goals?: MonthlyGoal[];
   today_food?: FoodLog[];
   today_workouts?: WorkoutLog[];
+  my_challenges?: ChallengeSummary[];
 }
 
 /**
@@ -186,7 +249,20 @@ export async function loadArena(windowDays = 30): Promise<Arena | null> {
   let payload: ArenaPayload | null = null;
   try {
     const supabase = await createClient();
-    const { data, error } = await supabase.rpc("get_arena", { days: windowDays });
+    // v7's get_arena takes (days, challenge_id). A database still on v4-v6
+    // only has (days), and PostgREST rejects the call outright rather than
+    // ignoring the extra argument — so try the new signature, then the old
+    // one, and only then give up to the slow path. Without this middle step a
+    // deploy landing before the migration would lose the single-round-trip
+    // win entirely.
+    let { data, error } = await supabase.rpc("get_arena", {
+      days: windowDays,
+      challenge_id: null,
+    });
+
+    if (error && (error.code === "PGRST202" || /get_arena/.test(error.message))) {
+      ({ data, error } = await supabase.rpc("get_arena", { days: windowDays }));
+    }
 
     if (error) {
       // PGRST202 = the function is not in the schema cache, i.e. this database
@@ -217,6 +293,15 @@ export async function loadArena(windowDays = 30): Promise<Arena | null> {
   // succeeds and simply omits today's entries. Detect the missing field
   // rather than the missing function, or the timeline silently renders empty
   // on a deploy that lands before the migration.
+  if (payload.my_challenges === undefined) {
+    try {
+      const supabase = await createClient();
+      payload.my_challenges = await fetchMyChallenges(supabase, payload.me);
+    } catch (err) {
+      console.warn("loadArena: could not list challenges —", (err as Error).message);
+    }
+  }
+
   if (payload.today_food === undefined) {
     try {
       const supabase = await createClient();
@@ -342,6 +427,7 @@ export async function loadArena(windowDays = 30): Promise<Arena | null> {
     goals: payload.goals ?? [],
     todayFood: payload.today_food ?? [],
     todayWorkouts: payload.today_workouts ?? [],
+    myChallenges: payload.my_challenges ?? [],
   };
 }
 

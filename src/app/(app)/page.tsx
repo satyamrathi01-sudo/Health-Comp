@@ -10,6 +10,7 @@ import RecoveryCard from "@/components/RecoveryCard";
 import MicroPanel from "@/components/MicroPanel";
 import TodayTimeline from "@/components/TodayTimeline";
 import ScoreGap from "@/components/ScoreGap";
+import ChallengeSwitcher from "@/components/ChallengeSwitcher";
 
 export const dynamic = "force-dynamic";
 
@@ -47,6 +48,13 @@ export default async function TodayPage() {
         subtitle={prettyDate}
         right={<StreakBadge days={me.streak} />}
       />
+
+      {arena.myChallenges.length > 1 && (
+        <ChallengeSwitcher
+          challenges={arena.myChallenges}
+          activeId={arena.challenge?.id ?? null}
+        />
+      )}
 
       {/* ---------- the one number that matters ---------- */}
       <section className="flex flex-col items-center">

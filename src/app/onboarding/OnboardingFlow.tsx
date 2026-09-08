@@ -91,6 +91,7 @@ export default function OnboardingFlow({ profile }: { profile: Profile }) {
   async function finish() {
     setError(null);
     setBusy(true);
+    let activeId: string | null = null;
     try {
       if (mode === "create") {
         const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || "Asia/Kolkata";
@@ -115,14 +116,24 @@ export default function OnboardingFlow({ profile }: { profile: Profile }) {
           .from("challenge_members")
           .insert({ challenge_id: challenge.id, user_id: profile.id });
         if (mErr) throw mErr;
+        activeId = challenge.id;
       } else {
-        const { error: jErr } = await supabase.rpc("join_challenge", { code: code.trim() });
+        const { data: joined, error: jErr } = await supabase.rpc("join_challenge", { code: code.trim() });
         if (jErr) throw jErr;
+        activeId = (joined as string) ?? null;
       }
 
+      // active_challenge_id may not exist yet on an un-migrated database, and
+      // failing to record a preference must never block finishing setup.
       const { error: pErr } = await supabase
-        .from("profiles").update({ onboarded: true }).eq("id", profile.id);
-      if (pErr) throw pErr;
+        .from("profiles")
+        .update({ onboarded: true, active_challenge_id: activeId })
+        .eq("id", profile.id);
+      if (pErr) {
+        const { error: fallbackErr } = await supabase
+          .from("profiles").update({ onboarded: true }).eq("id", profile.id);
+        if (fallbackErr) throw fallbackErr;
+      }
 
       router.replace("/");
       router.refresh();
