@@ -57,6 +57,7 @@ const EMPTY = {} as Record<string, number>;
 /**
  * PostgREST returns an embedded relation as either an object or a one-element
  * array depending on how it infers cardinality. Normalise both to one value.
+ * Only safe where a real foreign key exists between the two tables.
  */
 function embedded<T>(value: unknown): T | null {
   if (Array.isArray(value)) return (value[0] as T) ?? null;
@@ -110,17 +111,45 @@ export async function loadArena(windowDays = 30): Promise<Arena | null> {
     (memberships?.[0] as Record<string, unknown> | undefined)?.challenges,
   );
 
-  // Everyone in it (RLS lets challenge-mates read each other's profiles).
+  // Everyone in it, subject to RLS: as owner that is every rival, as a rival
+  // it is just me and the owner.
+  //
+  // Two queries rather than one embedded select. PostgREST cannot embed
+  // profiles here — challenge_members.user_id and profiles.id both reference
+  // auth.users, but there is no foreign key BETWEEN those two tables, so the
+  // embed fails with PGRST200. That error used to be swallowed, leaving the
+  // roster as just me and the dashboard reporting "no rival yet" however many
+  // people had actually joined.
   let profiles: Profile[] = [me];
+
   if (challenge) {
-    const { data: rows } = await supabase
+    const { data: memberRows, error: memberError } = await supabase
       .from("challenge_members")
-      .select("user_id, profiles(*)")
+      .select("user_id")
       .eq("challenge_id", challenge.id);
-    const found = (rows ?? [])
-      .map((r) => embedded<Profile>((r as Record<string, unknown>).profiles))
-      .filter((p): p is Profile => Boolean(p));
-    if (found.length) profiles = found;
+
+    if (memberError) {
+      console.error("loadArena: could not read challenge members —", memberError.message);
+    }
+
+    const memberIds = (memberRows ?? []).map((r) => String(r.user_id));
+
+    if (memberIds.length) {
+      const { data: profileRows, error: profileError } = await supabase
+        .from("profiles")
+        .select("*")
+        .in("id", memberIds);
+
+      if (profileError) {
+        console.error("loadArena: could not read profiles —", profileError.message);
+      }
+
+      const found = (profileRows ?? []) as Profile[];
+      // Keep myself in the list even if RLS hides me from my own roster query.
+      if (found.length) {
+        profiles = found.some((p) => p.id === me.id) ? found : [me, ...found];
+      }
+    }
   }
 
   const userIds = profiles.map((p) => p.id);
