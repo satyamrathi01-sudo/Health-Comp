@@ -500,14 +500,47 @@ drop function if exists public.shares_challenge_with(uuid);
 -- "who am I" request is needed either.
 -- =====================================================================
 
+/**
+ * Returns the caller's profile, creating it first if it is somehow missing.
+ *
+ * The signup trigger normally handles this, but an account created before
+ * the trigger existed — or one whose insert lost a race — ends up with an
+ * auth user and no profile row. That state is unrecoverable from the app:
+ * sign-in succeeds, the profile lookup returns nothing, and the layout
+ * bounces the user straight back to the login screen forever. Healing it on
+ * read costs one statement and removes the whole failure mode.
+ */
 create or replace function public.get_my_profile()
 returns jsonb
-language sql
-stable
-security invoker
+language plpgsql
+volatile
+security definer
 set search_path = public
 as $$
-  select to_jsonb(p) from public.profiles p where p.id = auth.uid();
+declare
+  uid uuid := auth.uid();
+  row_out public.profiles;
+begin
+  if uid is null then
+    return null;
+  end if;
+
+  select * into row_out from public.profiles where id = uid;
+  if found then
+    return to_jsonb(row_out);
+  end if;
+
+  insert into public.profiles (id, display_name)
+  select uid, coalesce(
+    nullif(trim(u.raw_user_meta_data->>'display_name'), ''),
+    nullif(split_part(coalesce(u.email, ''), '@', 1), ''),
+    'Player')
+  from auth.users u where u.id = uid
+  on conflict (id) do nothing;
+
+  select * into row_out from public.profiles where id = uid;
+  return to_jsonb(row_out);
+end;
 $$;
 
 create or replace function public.get_arena(days integer default 30)
@@ -585,3 +618,22 @@ $$;
 
 grant execute on function public.get_my_profile() to authenticated;
 grant execute on function public.get_arena(integer) to authenticated;
+
+-- =====================================================================
+-- v5 — backfill any auth user that never got a profile row.
+--
+-- One account was found in this state: sign-in worked, but with no profile
+-- the app had nothing to show and bounced it back to the login screen.
+-- Idempotent, so it is safe on every re-run.
+-- =====================================================================
+insert into public.profiles (id, display_name)
+select
+  u.id,
+  coalesce(
+    nullif(trim(u.raw_user_meta_data->>'display_name'), ''),
+    nullif(split_part(coalesce(u.email, ''), '@', 1), ''),
+    'Player')
+from auth.users u
+left join public.profiles p on p.id = u.id
+where p.id is null
+on conflict (id) do nothing;
