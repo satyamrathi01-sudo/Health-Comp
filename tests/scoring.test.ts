@@ -94,5 +94,65 @@ const level = compareScores(strongDay, strongDay);
 check("identical days are level", level.leader, "level");
 check("identical days have no gains", level.gains.length, 0);
 
+
+// ---- relative scoring: judged against each body's own targets ----
+
+// A big man maintaining on ~2900 kcal, and a smaller woman on ~1700.
+const BIG   = { burnTarget: 800, proteinTarget: 170, kcalTarget: 2400 };
+const SMALL = { burnTarget: 300, proteinTarget: 100, kcalTarget: 1500 };
+
+// The exact case that motivated this: 600 kcal burned should NOT beat 300
+// when the 600 came from a body expected to burn far more.
+const bigBurn   = scoreDay(T({ kcal_out: 600, sessions: 1 }), "d", 0, BIG);
+const smallBurn = scoreDay(T({ kcal_out: 300, sessions: 1 }), "d", 0, SMALL);
+const bigBurnLine   = bigBurn.lines.find((l) => l.key === "burn")!;
+const smallBurnLine = smallBurn.lines.find((l) => l.key === "burn")!;
+
+check("600/800 scores 75% of the burn max", bigBurnLine.points, 26.3);
+check("300/300 scores the full burn max", smallBurnLine.points, 35);
+check("smaller person burning less still wins the line",
+  smallBurnLine.points > bigBurnLine.points, true);
+
+// Hitting your own target is a full mark regardless of the absolute number.
+check("big hitting 800 maxes burn",
+  scoreDay(T({ kcal_out: 800, sessions: 1 }), "d", 0, BIG).lines.find((l) => l.key === "burn")!.points, 35);
+check("burn cannot exceed its max",
+  scoreDay(T({ kcal_out: 5000, sessions: 1 }), "d", 0, SMALL).lines.find((l) => l.key === "burn")!.points, 35);
+
+// Protein scales the same way.
+check("85/170 protein scores half",
+  scoreDay(T({ protein_g: 85, meals: 1 }), "d", 0, BIG).lines.find((l) => l.key === "protein")!.points, 12.5);
+check("100/100 protein maxes",
+  scoreDay(T({ protein_g: 100, meals: 1 }), "d", 0, SMALL).lines.find((l) => l.key === "protein")!.points, 25);
+
+// Calorie adherence punishes under-eating as well as over-eating.
+const onTarget = scoreDay(T({ kcal_in: 2400, meals: 3 }), "d", 0, BIG).lines.find((l) => l.key === "net")!;
+const wayUnder = scoreDay(T({ kcal_in: 1000, meals: 3 }), "d", 0, BIG).lines.find((l) => l.key === "net")!;
+const wayOver  = scoreDay(T({ kcal_in: 3800, meals: 3 }), "d", 0, BIG).lines.find((l) => l.key === "net")!;
+check("on target maxes calories", onTarget.points, 18);
+check("under-eating is penalised", wayUnder.points < onTarget.points, true);
+check("over-eating is penalised", wayOver.points < onTarget.points, true);
+check("no food still means no calorie points",
+  scoreDay(T({ kcal_out: 500, sessions: 1 }), "d", 0, BIG).lines.find((l) => l.key === "net")!.points, 0);
+
+// Active minutes stay absolute — an hour is an hour whoever you are.
+check("minutes ignore body targets",
+  scoreDay(T({ active_minutes: 60, sessions: 1 }), "d", 0, BIG).lines.find((l) => l.key === "minutes")!.points,
+  scoreDay(T({ active_minutes: 60, sessions: 1 }), "d", 0, SMALL).lines.find((l) => l.key === "minutes")!.points);
+
+// An incomplete profile must still produce a score.
+check("no targets falls back to raw", scoreDay(T({ kcal_out: 350, sessions: 1 }), "d", 0, null).relative, false);
+check("targets present marks the day relative", bigBurn.relative, true);
+check("a zeroed target is treated as unusable",
+  scoreDay(T({ kcal_out: 350, sessions: 1 }), "d", 0, { burnTarget: 0, proteinTarget: 0, kcalTarget: 0 }).relative, false);
+
+// Gap hints must speak in the trailing player's own units.
+const aheadDay  = scoreDay(T({ kcal_out: 300, sessions: 1 }), "d", 0, SMALL);
+const behindDay = scoreDay(T({ kcal_out: 100, sessions: 1 }), "d", 0, SMALL);
+const relGap = compareScores(behindDay, aheadDay);
+const burnGap = relGap.lines.find((l) => l.key === "burn")!;
+check("hint uses the small target, not the global constant",
+  /200 kcal more/.test(burnGap.toClose ?? ""), true);
+
 console.log(fails === 0 ? "\nAll scoring checks passed." : `\n${fails} FAILED`);
 process.exit(fails === 0 ? 0 : 1);

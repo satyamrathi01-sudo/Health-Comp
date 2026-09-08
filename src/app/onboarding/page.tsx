@@ -11,7 +11,7 @@ export default async function OnboardingPage() {
   if (profile.onboarded) redirect("/");
 
   return (
-    <main className="mx-auto w-full max-w-md px-5 py-8">
+    <main className="safe-top mx-auto w-full max-w-md px-5 pb-8">
       <OnboardingFlow profile={profile} />
     </main>
   );

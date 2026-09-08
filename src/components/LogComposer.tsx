@@ -195,7 +195,7 @@ export default function LogComposer({
 
   return (
     <div className="rise space-y-5 pb-4">
-      <PageHeader title="Log it" subtitle="Plain English. The AI does the rest." />
+      <PageHeader title="Log it" />
 
       <div className="grid grid-cols-2 gap-1 rounded-xl bg-ink-900 p-1">
         {(["food", "workout"] as Tab[]).map((t) => (
@@ -234,10 +234,11 @@ export default function LogComposer({
           placeholder={tab === "food" ? FOOD_PLACEHOLDER : WORKOUT_PLACEHOLDER}
           maxLength={1200}
         />
-        <div className="mt-1.5 flex items-center justify-between text-[0.68rem] text-mist-500">
-          <span>{tab === "food" ? "Rough quantities are fine." : "Say how long, or how many sets."}</span>
-          <span className="tnum">{text.length}/1200</span>
-        </div>
+        {text.length > 900 && (
+          <div className="mt-1.5 text-right text-[0.68rem] text-mist-600">
+            <span className="tnum">{text.length}/1200</span>
+          </div>
+        )}
       </div>
 
       {!aiReady && (
@@ -262,15 +263,17 @@ export default function LogComposer({
             {busy === "analyse" ? (
               <span className="thinking">Working out the numbers…</span>
             ) : (
-              "✨ Analyse with AI"
+              "Analyse"
             )}
           </button>
-          <button
-            className="btn btn-quiet w-full text-xs"
-            onClick={() => (tab === "food" ? setItems([blankItem()]) : setExercises([blankExercise(bodyWeight)]))}
-          >
-            or enter it manually
-          </button>
+          {(!aiReady || error) && (
+            <button
+              className="btn btn-quiet w-full text-xs"
+              onClick={() => (tab === "food" ? setItems([blankItem()]) : setExercises([blankExercise(bodyWeight)]))}
+            >
+              Enter it by hand instead
+            </button>
+          )}
         </div>
       ) : (
         <div className="space-y-4">

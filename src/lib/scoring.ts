@@ -5,17 +5,25 @@ import type { DailyTotals } from "./types";
  * whole app (today card, history, leaderboard) re-scores on next load.
  * No migration needed: scores are derived from raw logs at read time.
  *
- * MODE: "raw" — absolute numbers, nobody's body stats enter the maths.
- * Burn more, eat more protein, keep net calories low, log every day.
+ * Two modes, chosen per call:
  *
- * The known trade-off: a heavier person burns more kcal for identical
- * work, so raw burn slightly favours them. If that starts to bite, add a
- * "relative" branch here — the shape of the breakdown stays identical, so
- * nothing downstream needs to change.
+ *   RELATIVE (default whenever the player's profile is complete enough)
+ *     Every effort component is judged against that person's own target,
+ *     derived from their height, weight, age, activity and goal. Burning
+ *     600 kcal against a 400 target beats burning 600 against an 800 one.
+ *     This is what makes a head-to-head between different bodies mean
+ *     anything.
+ *
+ *   RAW (fallback when targets are unknown)
+ *     Absolute numbers. Kept because a half-filled profile should still
+ *     produce a score rather than nothing.
+ *
+ * Active minutes and the logging and streak bonuses stay absolute in both
+ * modes: an hour is an hour regardless of bodyweight, and showing up is
+ * showing up.
  * ===================================================================== */
 
 export const SCORING = {
-  mode: "raw" as const,
 
   burn: { kcalPerPoint: 10, max: 35 }, // 350 kcal burned = full marks
   activeMinutes: { minutesPerPoint: 5, max: 12 }, // 60 min = full marks
@@ -30,6 +38,17 @@ export const SCORING = {
       { upTo: 600, points: 10 },
       { upTo: 900, points: 5 },
     ] as { upTo: number; points: number }[],
+    /**
+     * Relative mode instead scores how close intake landed to that person's
+     * own calorie target, penalising over- and under-eating alike — a 1200
+     * kcal day is not a win for someone maintaining on 2900.
+     */
+    adherenceBands: [
+      { withinFraction: 0.10, points: 18 },
+      { withinFraction: 0.20, points: 13 },
+      { withinFraction: 0.35, points: 8 },
+    ] as { withinFraction: number; points: number }[],
+    adherenceFloor: 3,
   },
 
   /** Showing up at all. Split so a rest day still earns the training half. */
@@ -47,6 +66,13 @@ export const MAX_BASE_SCORE =
   SCORING.logging.food +
   SCORING.logging.training; // === 100
 
+/** One player's personal targets, from deriveTargets() in calc.ts. */
+export interface ScoreTargets {
+  burnTarget: number;
+  proteinTarget: number;
+  kcalTarget: number;
+}
+
 export interface ScoreLine {
   key: "burn" | "minutes" | "protein" | "net" | "logging" | "streak";
   label: string;
@@ -62,6 +88,9 @@ export interface DayScore {
   bonus: number;
   lines: ScoreLine[];
   logged: boolean;
+  /** Null when the profile was too incomplete and raw scoring was used. */
+  targets: ScoreTargets | null;
+  relative: boolean;
 }
 
 const round1 = (n: number) => Math.round(n * 10) / 10;
@@ -71,7 +100,12 @@ function capped(value: number, per: number, max: number): number {
   return Math.min(max, round1(value / per));
 }
 
-export function scoreDay(t: DailyTotals | null, date: string, streakDays = 0): DayScore {
+export function scoreDay(
+  t: DailyTotals | null,
+  date: string,
+  streakDays = 0,
+  targets: ScoreTargets | null = null,
+): DayScore {
   // Read fields defensively rather than materialising a zeroed DailyTotals:
   // that would need a runtime import and cost this module its purity.
   const kcalIn = t?.kcal_in ?? 0;
@@ -85,19 +119,49 @@ export function scoreDay(t: DailyTotals | null, date: string, streakDays = 0): D
   const hasFood = meals > 0;
   const trained = sessions > 0;
 
-  const burn = capped(kcalOut, SCORING.burn.kcalPerPoint, SCORING.burn.max);
-  const minutes = capped(activeMinutes, SCORING.activeMinutes.minutesPerPoint, SCORING.activeMinutes.max);
-  const protein = capped(proteinG, SCORING.protein.gramsPerPoint, SCORING.protein.max);
+  // Targets are only usable if they are actually populated.
+  const rel =
+    targets && targets.burnTarget > 0 && targets.proteinTarget > 0 && targets.kcalTarget > 0
+      ? targets
+      : null;
 
-  // Guard: without a food log, "net" would be a big negative number and
-  // hand out full marks for logging nothing. No food, no net points.
+  /* ---------------- burn ---------------- */
+  const burn = rel
+    ? round1(Math.min(1, kcalOut / rel.burnTarget) * SCORING.burn.max)
+    : capped(kcalOut, SCORING.burn.kcalPerPoint, SCORING.burn.max);
+
+  /* ---------------- protein ---------------- */
+  const protein = rel
+    ? round1(Math.min(1, proteinG / rel.proteinTarget) * SCORING.protein.max)
+    : capped(proteinG, SCORING.protein.gramsPerPoint, SCORING.protein.max);
+
+  /* ---------------- active minutes (absolute in both modes) ---------------- */
+  const minutes = capped(
+    activeMinutes,
+    SCORING.activeMinutes.minutesPerPoint,
+    SCORING.activeMinutes.max,
+  );
+
+  /* ---------------- calories ---------------- */
+  // Guard: without a food log this would hand out full marks for logging
+  // nothing at all.
   const net = kcalIn - kcalOut;
   let netPoints = 0;
-  if (hasFood) {
+  let netDetail = "no food logged";
+
+  if (hasFood && rel) {
+    const off = Math.abs(kcalIn - rel.kcalTarget) / rel.kcalTarget;
+    const band = SCORING.netCalories.adherenceBands.find((b) => off <= b.withinFraction);
+    netPoints = band ? band.points : SCORING.netCalories.adherenceFloor;
+    const delta = Math.round(kcalIn - rel.kcalTarget);
+    netDetail = `${Math.round(kcalIn)} vs ${rel.kcalTarget} aim (${delta > 0 ? "+" : ""}${delta})`;
+  } else if (hasFood) {
     const band = SCORING.netCalories.bands.find((b) => net <= b.upTo);
     netPoints = band ? band.points : 0;
+    netDetail = `${net > 0 ? "+" : ""}${Math.round(net)} kcal`;
   }
 
+  /* ---------------- showing up ---------------- */
   const loggingPoints =
     (hasFood ? SCORING.logging.food : 0) +
     (trained || isRestDay ? SCORING.logging.training : 0);
@@ -108,21 +172,25 @@ export function scoreDay(t: DailyTotals | null, date: string, streakDays = 0): D
     {
       key: "burn",
       label: "Calories burned",
-      detail: `${Math.round(kcalOut)} kcal`,
+      detail: rel
+        ? `${Math.round(kcalOut)} / ${rel.burnTarget} kcal`
+        : `${Math.round(kcalOut)} kcal`,
       points: burn,
       max: SCORING.burn.max,
     },
     {
       key: "protein",
       label: "Protein",
-      detail: `${Math.round(proteinG)} g`,
+      detail: rel
+        ? `${Math.round(proteinG)} / ${rel.proteinTarget} g`
+        : `${Math.round(proteinG)} g`,
       points: protein,
       max: SCORING.protein.max,
     },
     {
       key: "net",
-      label: "Net calories",
-      detail: hasFood ? `${net > 0 ? "+" : ""}${Math.round(net)} kcal` : "no food logged",
+      label: rel ? "Calorie target" : "Net calories",
+      detail: netDetail,
       points: netPoints,
       max: SCORING.netCalories.max,
     },
@@ -160,6 +228,8 @@ export function scoreDay(t: DailyTotals | null, date: string, streakDays = 0): D
     total: round1(base + bonus),
     lines,
     logged: hasFood || trained || isRestDay,
+    targets: rel,
+    relative: rel !== null,
   };
 }
 
@@ -228,24 +298,39 @@ export interface ScoreGap {
 /** Roughly 5.3 kcal/min for brisk walking at 70 kg (MET 4.3). */
 const KCAL_PER_WALK_MIN = 5.3;
 
-function closeHint(key: ScoreLine["key"], pointsBehind: number): string | null {
+function closeHint(
+  key: ScoreLine["key"],
+  pointsBehind: number,
+  targets: ScoreTargets | null,
+): string | null {
   if (pointsBehind <= 0) return null;
   const p = pointsBehind;
 
   switch (key) {
     case "burn": {
-      const kcal = Math.round(p * SCORING.burn.kcalPerPoint);
+      // In relative mode a point is worth a share of that person's own burn
+      // target, so the advice is in their units rather than a global constant.
+      const kcalPerPoint = targets
+        ? targets.burnTarget / SCORING.burn.max
+        : SCORING.burn.kcalPerPoint;
+      const kcal = Math.round(p * kcalPerPoint);
       const mins = Math.round(kcal / KCAL_PER_WALK_MIN);
       return `${kcal} kcal more — about a ${mins}-minute brisk walk`;
     }
     case "protein": {
-      const grams = Math.round(p * SCORING.protein.gramsPerPoint);
-      return `${grams} g more protein — roughly ${Math.max(1, Math.round(grams / 18))} eggs, or ${Math.round(grams / 18) * 100} g of paneer`;
+      const gramsPerPoint = targets
+        ? targets.proteinTarget / SCORING.protein.max
+        : SCORING.protein.gramsPerPoint;
+      const grams = Math.round(p * gramsPerPoint);
+      const eggs = Math.max(1, Math.round(grams / 18));
+      return `${grams} g more protein — roughly ${eggs} eggs, or ${eggs * 100} g of paneer`;
     }
     case "minutes":
       return `${Math.round(p * SCORING.activeMinutes.minutesPerPoint)} more active minutes`;
     case "net":
-      return "eat a little less, or train a little more, to close the calorie gap";
+      return targets
+        ? `land closer to your ${targets.kcalTarget} kcal target`
+        : "eat a little less, or train a little more, to close the calorie gap";
     case "logging":
       return "log both food and training — a rest day counts";
     case "streak":
@@ -270,8 +355,13 @@ export function compareScores(mine: DayScore, theirs: DayScore): ScoreGap {
       delta,
       mineDetail: line.detail,
       theirsDetail: other?.detail ?? "—",
-      // The hint is addressed to whoever is behind on this line.
-      toClose: closeHint(line.key, Math.abs(delta)),
+      // Addressed to whoever is behind on this line, in THEIR units: their
+      // targets are what decide how much work a point actually represents.
+      toClose: closeHint(
+        line.key,
+        Math.abs(delta),
+        delta < 0 ? mine.targets : theirs.targets,
+      ),
     };
   });
 

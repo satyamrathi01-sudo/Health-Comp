@@ -52,28 +52,42 @@ standalone app, no app store involved.
 raw logs at read time**, never stored — so changing a weight there instantly
 re-scores all history, no migration.
 
-Mode is **raw absolute numbers**: nobody's body stats enter the maths.
+Each player is judged against **their own body**, not against each other's raw
+numbers. Targets come from `deriveTargets()` in `src/lib/calc.ts`: Mifflin–St
+Jeor BMR, an activity multiplier for maintenance, protein per kg by goal, and a
+daily burn target set at 15% of maintenance.
 
 | Component | Full marks at | Points |
 |---|---|---|
-| Calories burned | 350 kcal | 35 |
-| Protein | 125 g | 25 |
-| Net calories (eaten − burned) | ≤ 0 kcal | 18 |
+| Calories burned | your own burn target | 35 |
+| Protein | your own protein target | 25 |
+| Calorie target | intake within 10% of your aim | 18 |
 | Active minutes | 60 min | 12 |
 | Logged the day | food + training (or rest day) | 10 |
 | **Base** | | **100** |
 | Streak bonus | 10 consecutive days | +10 |
 
-Net calories only score once food is logged — otherwise skipping breakfast
-would be worth 18 free points.
+So burning 600 kcal against an 800 target scores *less* than burning 300
+against a 300 target. That is the point: a 95 kg man maintaining on 2900 kcal
+has to do meaningfully more work than a 55 kg woman on 1700 to earn the same
+score.
 
-**The known trade-off:** a heavier person burns more kcal for identical work,
-so raw burn mildly favours them. If that starts to bite, add a `"relative"`
-branch in `SCORING` that divides by bodyweight or by each player's own targets
-(`deriveTargets()` in `src/lib/calc.ts` already computes them, and they're shown
-on the Me tab). The breakdown shape stays the same, so no UI changes needed.
+Active minutes, the logging points and the streak stay absolute — an hour is an
+hour whoever you are, and showing up is showing up.
 
----
+Two guards worth knowing about:
+
+- Calories only score once food is logged, otherwise skipping breakfast would
+  be worth 18 free points.
+- Intake is scored on *distance from* your target, so under-eating is penalised
+  as well as over-eating.
+
+If a profile is too incomplete to derive targets, that player falls back to
+absolute scoring rather than getting no score at all.
+
+`compareScores()` explains any two days line by line and states what the
+trailing side would have to do to close each gap — in their own units, since a
+point of "burn" is worth a different number of calories to each person.
 
 ## How the AI is used
 

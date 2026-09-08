@@ -87,8 +87,8 @@ export default async function MePage() {
               <div className="hair" />
               <DataRow label="Protein aim" value={`${targets.proteinTarget} g`} sub="per day" />
               <p className="hair pt-3 text-[0.65rem] leading-relaxed text-mist-600">
-                Guidance only. Scoring runs on raw numbers — burn, protein, net calories —
-                so neither of you gets an easier target.
+                Your score is measured against these, not against your rival&apos;s raw
+                numbers — so a bigger body has to do more to earn the same points.
               </p>
             </div>
           </Disclosure>

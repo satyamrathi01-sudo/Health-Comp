@@ -52,7 +52,20 @@ export interface DerivedTargets {
   tdee: number;
   kcalTarget: number;
   proteinTarget: number;
+  /** Expected daily burn from deliberate exercise. */
+  burnTarget: number;
 }
+
+/**
+ * Exercise burn expected in a day, as a share of maintenance.
+ *
+ * Scaling by TDEE is what makes the head-to-head fair: a 95 kg man maintaining
+ * on 2900 kcal has to do meaningfully more work than a 55 kg woman on 1700 to
+ * earn the same score, which is the whole point of judging people against
+ * their own body rather than against each other's raw totals.
+ */
+const BURN_TARGET_SHARE_OF_TDEE = 0.15;
+const MIN_BURN_TARGET = 200;
 
 /**
  * Reference numbers for the dashboard. In raw scoring mode these are shown
@@ -69,6 +82,7 @@ export function deriveTargets(p: Profile): DerivedTargets | null {
     tdee,
     kcalTarget: Math.max(1200, Math.round(tdee + GOAL_KCAL_DELTA[p.goal])),
     proteinTarget: Math.round(p.weight_kg * GOAL_PROTEIN_PER_KG[p.goal]),
+    burnTarget: Math.max(MIN_BURN_TARGET, Math.round(tdee * BURN_TARGET_SHARE_OF_TDEE)),
   };
 }
 

@@ -169,11 +169,7 @@ export default async function TodayPage() {
         action={<Link href="/log" className="text-xs font-semibold text-lime-glow">Add</Link>}
       >
         {(foods?.length ?? 0) + (workouts?.length ?? 0) === 0 ? (
-          <EmptyState
-            icon="○"
-            title="Nothing logged yet"
-            body="Tap + and describe your meal or workout in plain English."
-          />
+          <EmptyState icon="○" title="Nothing logged yet" />
         ) : (
           <TodayTimeline
             foods={(foods ?? []) as FoodLog[]}

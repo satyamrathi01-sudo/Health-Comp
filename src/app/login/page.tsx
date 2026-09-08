@@ -12,7 +12,7 @@ export default async function LoginPage() {
   if (profile) redirect(profile.onboarded ? "/" : "/onboarding");
 
   return (
-    <main className="mx-auto flex min-h-dvh w-full max-w-md flex-col justify-center px-5 py-10">
+    <main className="safe-top mx-auto flex min-h-dvh w-full max-w-md flex-col justify-center px-5 pb-10">
       <div className="mb-8 text-center">
         <div className="mx-auto mb-5 flex h-14 w-14 items-center justify-center rounded-2xl bg-ink-900 text-2xl">
           ⚡

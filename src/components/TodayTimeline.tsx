@@ -13,6 +13,25 @@ const SLOT_LABEL: Record<string, string> = {
   breakfast: "Breakfast", lunch: "Lunch", dinner: "Dinner", snack: "Snack",
 };
 
+/**
+ * What the entry is, rather than what you typed to create it. The raw prompt
+ * is still stored — it just is not the interesting part once the food has
+ * been broken down.
+ */
+function foodTitle(log: FoodLog): string {
+  const names = log.items.map((i) => i.name).filter(Boolean);
+  if (!names.length) return log.raw_text;
+  if (names.length <= 3) return names.join(" · ");
+  return `${names.slice(0, 3).join(" · ")} +${names.length - 3}`;
+}
+
+function workoutTitle(log: WorkoutLog): string {
+  const names = log.exercises.map((e) => e.name).filter(Boolean);
+  if (!names.length) return log.raw_text;
+  if (names.length <= 3) return names.join(" · ");
+  return `${names.slice(0, 3).join(" · ")} +${names.length - 3}`;
+}
+
 export default function TodayTimeline({ foods, workouts }: { foods: FoodLog[]; workouts: WorkoutLog[] }) {
   const router = useRouter();
   const [open, setOpen] = useState<string | null>(null);
@@ -49,12 +68,14 @@ export default function TodayTimeline({ foods, workouts }: { foods: FoodLog[]; w
               aria-expanded={isOpen}
             >
               <span className="min-w-0 flex-1">
-                <span className="block truncate text-sm text-mist-200">{entry.log.raw_text}</span>
+                <span className="block truncate text-sm text-mist-200">
+                  {isFood ? foodTitle(entry.log as FoodLog) : workoutTitle(entry.log as WorkoutLog)}
+                </span>
                 <span className="eyebrow mt-1 block">
                   {isFood ? SLOT_LABEL[(entry.log as FoodLog).meal_slot] ?? "Meal" : "Training"}
                   {" · "}{time(entry.at)}
                   {isFood
-                    ? ` · ${Math.round((entry.log as FoodLog).protein_g)}g protein`
+                    ? ` · P${Math.round((entry.log as FoodLog).protein_g)} C${Math.round((entry.log as FoodLog).carbs_g)} F${Math.round((entry.log as FoodLog).fat_g)}`
                     : ` · ${Math.round((entry.log as WorkoutLog).minutes)} min`}
                 </span>
               </span>

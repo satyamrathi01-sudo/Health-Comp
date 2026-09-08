@@ -45,7 +45,19 @@ body {
   color: var(--color-mist-200);
   font-family: var(--font-sans);
   -webkit-font-smoothing: antialiased;
-  padding-bottom: calc(5rem + env(safe-area-inset-bottom));
+  /* Clear the fixed nav plus the home indicator, and no more: an oversized
+     value here reads as a big empty band under short pages. */
+  padding-bottom: calc(4.25rem + env(safe-area-inset-bottom));
+}
+
+/* viewportFit: "cover" lets the page paint under the status bar and Dynamic
+   Island, which is what we want for the background — but never for content. */
+.safe-top {
+  padding-top: calc(env(safe-area-inset-top, 0px) + 1.5rem);
+}
+
+.safe-top-sm {
+  padding-top: calc(env(safe-area-inset-top, 0px) + 0.75rem);
 }
 
 .tnum {

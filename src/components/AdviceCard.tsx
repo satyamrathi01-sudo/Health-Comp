@@ -128,10 +128,8 @@ export default function AdviceCard({ hasData }: { hasData: boolean }) {
         ))}
       </ul>
       <div className="hair flex items-center justify-between gap-3 px-5 py-2.5">
-        <p className="text-[0.6rem] leading-relaxed text-mist-600">
-          {advice.stale
-            ? "You've logged more since this was written."
-            : "General fitness guidance from your own logs — not medical advice."}
+        <p className="text-[0.6rem] text-mist-600">
+          {advice.stale ? "You've logged more since this" : ""}
         </p>
         <button
           onClick={refresh}

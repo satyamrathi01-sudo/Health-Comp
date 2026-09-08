@@ -1,6 +1,6 @@
 import "server-only";
 import { createClient, supabaseConfigured } from "./supabase/server";
-import { addDays, dateRange, localDate } from "./calc";
+import { addDays, dateRange, deriveTargets, localDate } from "./calc";
 import { dayOutcome, scoreDay, streakEndingAt, type DayScore } from "./scoring";
 import { emptyDailyTotals, MICRO_KEYS, type Challenge, type DailyTotals, type Profile, type SleepQuality } from "./types";
 
@@ -197,8 +197,18 @@ export async function loadArena(windowDays = 30): Promise<Arena | null> {
   profiles.forEach((p) => byUser.set(p.id, new Map()));
   totals.forEach((t) => byUser.get(t.user_id)?.set(t.local_date, t));
 
-  // First pass: score every day for every player.
+  // First pass: score every day for every player, each against their OWN
+  // targets. This is what makes the head-to-head fair across different
+  // bodies — see the mode note in src/lib/scoring.ts.
   const drafts = profiles.map((profile) => {
+    const derived = deriveTargets(profile);
+    const targets = derived
+      ? {
+          burnTarget: derived.burnTarget,
+          proteinTarget: derived.proteinTarget,
+          kcalTarget: derived.kcalTarget,
+        }
+      : null;
     const mine = byUser.get(profile.id) ?? new Map<string, DailyTotals>();
     const loggedDates = new Set(
       [...mine.values()].filter((t) => t.meals > 0 || t.sessions > 0 || t.is_rest_day)
@@ -208,7 +218,7 @@ export async function loadArena(windowDays = 30): Promise<Arena | null> {
     for (const d of days) {
       const t = mine.get(d) ?? emptyDailyTotals(profile.id, d);
       // Streak as of that day, so history shows the bonus actually earned.
-      scores.set(d, scoreDay(t, d, streakEndingAt(loggedDates, d)));
+      scores.set(d, scoreDay(t, d, streakEndingAt(loggedDates, d), targets));
     }
     return {
       profile,

@@ -12,7 +12,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
 
   return (
     <>
-      <main className="mx-auto w-full max-w-md px-4 pt-6">{children}</main>
+      <main className="safe-top mx-auto w-full max-w-md px-4">{children}</main>
       <BottomNav />
     </>
   );
