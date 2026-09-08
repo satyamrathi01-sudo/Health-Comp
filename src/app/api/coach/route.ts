@@ -4,6 +4,7 @@ import { createClient, supabaseConfigured } from "@/lib/supabase/server";
 import { generateAdvice, GeminiError } from "@/lib/gemini";
 import { applyGoalsToTargets, daysInMonthOf, deriveTargets, MICRO_REFS, microTarget } from "@/lib/calc";
 import { projectedGain, scoreDay, type ScoreTargets } from "@/lib/scoring";
+import { computeRecovery } from "@/lib/recovery";
 import type { AdvicePoint, DailyTotals, MonthlyGoal, Profile } from "@/lib/types";
 
 export const runtime = "nodejs";
@@ -146,7 +147,43 @@ export async function POST(request: Request) {
     );
   }
 
-  const text = briefing(profile, todayTotals, week, goals, targets);
+  // Readiness changes what good advice looks like: telling someone to go
+  // hard on four hours of sleep is bad coaching.
+  const yesterdayDate = (() => {
+    const d = new Date(today + "T00:00:00Z");
+    d.setUTCDate(d.getUTCDate() - 1);
+    return d.toISOString().slice(0, 10);
+  })();
+  const yesterday = week.find((d) => d.local_date === yesterdayDate) ?? null;
+
+  let consecutiveTrainingDays = 0;
+  for (let i = 1; i < 8; i++) {
+    const d = new Date(today + "T00:00:00Z");
+    d.setUTCDate(d.getUTCDate() - i);
+    const row = week.find((w) => w.local_date === d.toISOString().slice(0, 10));
+    if (!row || row.sessions === 0) break;
+    consecutiveTrainingDays++;
+  }
+
+  const recovery = computeRecovery({
+    sleepHours: todayTotals?.sleep_hours ?? null,
+    sleepQuality: todayTotals?.sleep_quality ?? null,
+    yesterdayBurn: yesterday?.kcal_out ?? 0,
+    yesterdayKcalIn: yesterday?.kcal_in ?? 0,
+    yesterdayProtein: yesterday?.protein_g ?? 0,
+    yesterdayLoggedFood: (yesterday?.meals ?? 0) > 0,
+    consecutiveTrainingDays,
+    targets,
+  });
+
+  const text =
+    briefing(profile, todayTotals, week, goals, targets) +
+    (recovery.score === null
+      ? "\n\nRECOVERY: unknown, no sleep logged."
+      : `\n\nRECOVERY: ${recovery.score}/100 (${recovery.band}) — ${recovery.headline}.\n` +
+        recovery.drivers.map((d) => `  ${d.label}: ${Math.round(d.value * 100)}% (${d.detail})`).join("\n") +
+        "\nIf recovery is low, say so and steer them toward rest and sleep rather than " +
+        "more training, however tempting the score is.");
 
   // Regenerate only when the day's numbers actually moved. Without this the
   // coach would burn a Gemini call on every dashboard render.

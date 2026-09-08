@@ -7,6 +7,7 @@ import { DataRow, EmptyState, Metric, PageHeader, Ring, Section, StreakBadge } f
 import Disclosure from "@/components/Disclosure";
 import AdviceCard from "@/components/AdviceCard";
 import SleepCard from "@/components/SleepCard";
+import RecoveryCard from "@/components/RecoveryCard";
 import MicroPanel from "@/components/MicroPanel";
 import TodayTimeline from "@/components/TodayTimeline";
 import ScoreGap from "@/components/ScoreGap";
@@ -105,6 +106,9 @@ export default async function TodayPage() {
             hint={`${Math.round(totals?.active_minutes ?? 0)} min`} />
         </div>
       </section>
+
+      {/* ---------- how ready you are ---------- */}
+      <RecoveryCard recovery={me.recovery} />
 
       {/* ---------- why the gap ---------- */}
       {them && theirScore && (todayScoreLogged || theirScore.logged) && (

@@ -2,11 +2,14 @@ import "server-only";
 import { createClient, supabaseConfigured } from "./supabase/server";
 import { addDays, applyGoalsToTargets, dateRange, daysInMonthOf, deriveTargets, localDate } from "./calc";
 import { dayOutcome, scoreDay, streakEndingAt, type DayScore } from "./scoring";
+import { computeRecovery, type Recovery } from "./recovery";
 import { emptyDailyTotals, MICRO_KEYS, type Challenge, type DailyTotals, type MonthlyGoal, type Profile, type SleepQuality } from "./types";
 
 export interface PlayerView {
   profile: Profile;
   isMe: boolean;
+  /** Readiness to train today. Estimated, not measured — see recovery.ts. */
+  recovery: Recovery;
   /** date -> score, for every day in the requested window */
   scores: Map<string, DayScore>;
   totals: Map<string, DailyTotals>;
@@ -235,9 +238,33 @@ export async function loadArena(windowDays = 30): Promise<Arena | null> {
       // Streak as of that day, so history shows the bonus actually earned.
       scores.set(d, scoreDay(t, d, streakEndingAt(loggedDates, d), targets));
     }
+    // Recovery looks backwards: last night's sleep (filed under today) and
+    // what yesterday's training and eating did to them.
+    const todayTotals = mine.get(today) ?? null;
+    const yesterday = mine.get(addDays(today, -1)) ?? null;
+
+    let consecutiveTrainingDays = 0;
+    for (let i = 1; i < 30; i++) {
+      const t = mine.get(addDays(today, -i));
+      if (!t || t.sessions === 0) break;
+      consecutiveTrainingDays++;
+    }
+
+    const recovery = computeRecovery({
+      sleepHours: todayTotals?.sleep_hours ?? null,
+      sleepQuality: todayTotals?.sleep_quality ?? null,
+      yesterdayBurn: yesterday?.kcal_out ?? 0,
+      yesterdayKcalIn: yesterday?.kcal_in ?? 0,
+      yesterdayProtein: yesterday?.protein_g ?? 0,
+      yesterdayLoggedFood: (yesterday?.meals ?? 0) > 0,
+      consecutiveTrainingDays,
+      targets,
+    });
+
     return {
       profile,
       isMe: profile.id === me.id,
+      recovery,
       scores,
       totals: mine,
       // Today's streak: if today isn't logged yet, show yesterday's run.

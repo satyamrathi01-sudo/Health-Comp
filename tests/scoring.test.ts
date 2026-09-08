@@ -238,5 +238,59 @@ check("hitting your goal target maxes protein",
 check("a harder target scores the same intake lower",
   withoutGoal.lines.find((l) => l.key === "protein")!.points < 25, true);
 
+
+// ---- recovery ----
+import { computeRecovery } from "../src/lib/recovery.ts";
+
+const REC_TARGETS = { burnTarget: 400, proteinTarget: 150, kcalTarget: 2200 };
+const rec = (o: Partial<any> = {}) => computeRecovery({
+  sleepHours: 8, sleepQuality: "good",
+  yesterdayBurn: 0, yesterdayKcalIn: 2200, yesterdayProtein: 150,
+  yesterdayLoggedFood: true, consecutiveTrainingDays: 0,
+  targets: REC_TARGETS, ...o,
+});
+
+check("no sleep logged means no score", rec({ sleepHours: null }).score, null);
+check("and says why", /Log your sleep/.test(rec({ sleepHours: null }).headline), true);
+
+const rested = rec();
+check("a full night, fed and rested scores high", rested.score! >= 90, true);
+check("and is banded high", rested.band, "high");
+
+check("four hours of sleep drags it down", rec({ sleepHours: 4 }).score! < rested.score!, true);
+check("poor quality scores below good",
+  rec({ sleepQuality: "poor" }).score! < rec({ sleepQuality: "good" }).score!, true);
+
+// Yesterday's overreach must reduce today's readiness.
+check("a huge session yesterday lowers recovery",
+  rec({ yesterdayBurn: 1200 }).score! < rested.score!, true);
+check("training every day without rest lowers it further",
+  rec({ yesterdayBurn: 1200, consecutiveTrainingDays: 6 }).score!
+    < rec({ yesterdayBurn: 1200, consecutiveTrainingDays: 0 }).score!, true);
+
+// Under-fuelling is a recovery problem, not just a scoring one.
+check("severe under-eating lowers recovery",
+  rec({ yesterdayKcalIn: 700, yesterdayProtein: 30 }).score! < rested.score!, true);
+check("unlogged food is treated as partial credit, not zero",
+  rec({ yesterdayLoggedFood: false }).score! > 0, true);
+
+// The guidance should name the actual limiter.
+const sleepy = rec({ sleepHours: 4, sleepQuality: "poor" });
+check("low recovery bands low", sleepy.band, "low");
+check("guidance names sleep as the limiter", /[Ss]leep is the limiter/.test(sleepy.guidance), true);
+const beaten = rec({ yesterdayBurn: 2000, consecutiveTrainingDays: 7 });
+check("guidance names fatigue when load is the limiter",
+  /fatigue|rest day/.test(beaten.guidance), true);
+
+check("score never leaves 0-100",
+  rec({ sleepHours: 14, yesterdayBurn: 0 }).score! <= 100
+    && rec({ sleepHours: 1, yesterdayBurn: 9000, consecutiveTrainingDays: 20, yesterdayKcalIn: 0, yesterdayProtein: 0 }).score! >= 0,
+  true);
+
+// Recovery must not leak into the daily score.
+const dayA = scoreDay(T({ protein_g: 100, meals: 2, kcal_out: 400, sessions: 1 }), "d", 0, REC_TARGETS);
+const dayB = scoreDay(T({ protein_g: 100, meals: 2, kcal_out: 400, sessions: 1, sleep_hours: 3 }), "d", 0, REC_TARGETS);
+check("sleep does not change the daily score", dayA.total, dayB.total);
+
 console.log(fails === 0 ? "\nAll scoring checks passed." : `\n${fails} FAILED`);
 process.exit(fails === 0 ? 0 : 1);
