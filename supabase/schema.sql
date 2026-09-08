@@ -484,3 +484,97 @@ left join public.sleep_logs s on s.user_id = d.user_id and s.local_date = d.loca
 -- policy still references it.
 -- =====================================================================
 drop function if exists public.shares_challenge_with(uuid);
+
+-- =====================================================================
+-- v4 — performance.
+--
+-- The dashboard used to take six sequential round trips: whoami, my
+-- profile, my challenge, its member ids, their profiles, then the totals.
+-- On a Vercel function in us-east talking to Supabase, each of those is a
+-- full cross-region hop and the page crawled.
+--
+-- These two functions collapse that into one call each. Both are SECURITY
+-- INVOKER on purpose: RLS then applies exactly as it does to the equivalent
+-- direct queries, so hub-and-spoke visibility is preserved with no extra
+-- filtering here. auth.uid() is read from the caller's JWT, so no separate
+-- "who am I" request is needed either.
+-- =====================================================================
+
+create or replace function public.get_my_profile()
+returns jsonb
+language sql
+stable
+security invoker
+set search_path = public
+as $$
+  select to_jsonb(p) from public.profiles p where p.id = auth.uid();
+$$;
+
+create or replace function public.get_arena(days integer default 30)
+returns jsonb
+language plpgsql
+stable
+security invoker
+set search_path = public
+as $$
+declare
+  uid        uuid := auth.uid();
+  me_row     public.profiles;
+  ch         public.challenges;
+  member_ids uuid[];
+  today      date;
+  from_date  date;
+begin
+  if uid is null then
+    return null;
+  end if;
+
+  select * into me_row from public.profiles where id = uid;
+  if not found then
+    return null;
+  end if;
+
+  -- The user's own timezone decides where "today" starts.
+  today     := (now() at time zone coalesce(me_row.timezone, 'Asia/Kolkata'))::date;
+  from_date := today - (greatest(coalesce(days, 30), 1) - 1);
+
+  select c.* into ch
+  from public.challenge_members m
+  join public.challenges c on c.id = m.challenge_id
+  where m.user_id = uid
+  order by m.joined_at desc
+  limit 1;
+
+  -- RLS already restricts this to people I am allowed to see: everyone for
+  -- the owner, only myself and the owner for a rival.
+  if ch.id is not null then
+    select array_agg(m.user_id)
+      into member_ids
+      from public.challenge_members m
+     where m.challenge_id = ch.id;
+  end if;
+
+  if member_ids is null then
+    member_ids := array[uid];
+  end if;
+
+  return jsonb_build_object(
+    'today',     today,
+    'from_date', from_date,
+    'me',        to_jsonb(me_row),
+    'challenge', case when ch.id is null then null else to_jsonb(ch) end,
+    'players',   coalesce(
+                   (select jsonb_agg(to_jsonb(p) order by p.created_at)
+                      from public.profiles p
+                     where p.id = any(member_ids)), '[]'::jsonb),
+    'totals',    coalesce(
+                   (select jsonb_agg(to_jsonb(t))
+                      from public.daily_totals t
+                     where t.user_id = any(member_ids)
+                       and t.local_date between from_date and today), '[]'::jsonb)
+  );
+end;
+$$;
+
+grant execute on function public.get_my_profile() to authenticated;
+grant execute on function public.get_arena(integer) to authenticated;

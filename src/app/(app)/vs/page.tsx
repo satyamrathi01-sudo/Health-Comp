@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { loadArena, mine, rival, rivals, type PlayerView } from "@/lib/data";
 import { EmptyState, PageHeader, Section } from "@/components/ui";
 import type { DayScore } from "@/lib/scoring";
@@ -56,7 +57,9 @@ export default async function VersusPage() {
               <div className="tnum mt-1.5 text-[0.65rem] text-mist-600">{me.ties} drawn</div>
             )}
           </div>
-          <Side player={them} color={THEM} align="right" label={them.profile.display_name.split(" ")[0]} />
+          <Link href={`/vs/${them.profile.id}`}>
+            <Side player={them} color={THEM} align="right" label={them.profile.display_name.split(" ")[0]} />
+          </Link>
         </section>
       ) : (
         <Section title="Standings">
@@ -64,31 +67,43 @@ export default async function VersusPage() {
             {[me, ...others]
               .slice()
               .sort((a, b) => b.points - a.points)
-              .map((p, i) => (
-                <div key={p.profile.id} className={`flex items-center gap-3 py-3.5 ${i > 0 ? "hair" : ""}`}>
-                  <span className="tnum w-4 text-xs text-mist-600">{i + 1}</span>
-                  <span className="text-xl" aria-hidden="true">{p.profile.avatar_emoji}</span>
-                  <div className="min-w-0 flex-1">
-                    <div className="truncate text-sm font-semibold text-white">
-                      {p.isMe ? "You" : p.profile.display_name}
+              .map((p, i) => {
+                const row = (
+                  <>
+                    <span className="tnum w-4 text-xs text-mist-600">{i + 1}</span>
+                    <span className="text-xl" aria-hidden="true">{p.profile.avatar_emoji}</span>
+                    <div className="min-w-0 flex-1">
+                      <div className="truncate text-sm font-semibold text-white">
+                        {p.isMe ? "You" : p.profile.display_name}
+                      </div>
+                      <div className="tnum mt-0.5 text-[0.65rem] text-mist-600">
+                        {p.wins}W · {p.losses}L · {p.ties}D
+                        {p.streak > 0 && ` · 🔥${p.streak}`}
+                      </div>
                     </div>
-                    <div className="tnum mt-0.5 text-[0.65rem] text-mist-600">
-                      {p.wins}W · {p.losses}L · {p.ties}D
-                      {p.streak > 0 && ` · 🔥${p.streak}`}
-                    </div>
-                  </div>
-                  <span
-                    className="tnum text-lg font-bold"
-                    style={{ color: p.isMe ? YOU : THEM }}
-                  >
-                    {Math.round(p.points)}
-                  </span>
-                </div>
-              ))}
+                    <span className="tnum text-lg font-bold" style={{ color: p.isMe ? YOU : THEM }}>
+                      {Math.round(p.points)}
+                    </span>
+                    {!p.isMe && (
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                        strokeWidth="2.5" strokeLinecap="round" className="shrink-0 text-mist-600"
+                        aria-hidden="true">
+                        <path d="m9 18 6-6-6-6" />
+                      </svg>
+                    )}
+                  </>
+                );
+                const cls = `flex items-center gap-3 py-3.5 ${i > 0 ? "hair" : ""}`;
+                return p.isMe ? (
+                  <div key={p.profile.id} className={cls}>{row}</div>
+                ) : (
+                  <Link key={p.profile.id} href={`/vs/${p.profile.id}`} className={cls}>{row}</Link>
+                );
+              })}
           </div>
           <p className="mt-2 px-1 text-[0.65rem] leading-relaxed text-mist-600">
-            You created this challenge, so you see everyone. Each of them sees only their
-            own numbers against yours.
+            Tap anyone for the head-to-head. You created this challenge, so you see
+            everyone — each of them sees only their own numbers against yours.
           </p>
         </Section>
       )}

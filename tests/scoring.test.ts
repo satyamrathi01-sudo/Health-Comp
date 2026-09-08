@@ -70,5 +70,29 @@ const monster = scoreDay(
 );
 check("everything capped => exactly 100", monster.base, 100);
 
+
+// ---- score gap ----
+import { compareScores } from "../src/lib/scoring.ts";
+
+const strongDay = scoreDay(T({ kcal_in: 1800, protein_g: 140, meals: 3, kcal_out: 400, active_minutes: 60, sessions: 1 }), "d", 0);
+const weakDay   = scoreDay(T({ kcal_in: 2400, protein_g: 60,  meals: 2, kcal_out: 100, active_minutes: 15, sessions: 1 }), "d", 0);
+
+const gap = compareScores(strongDay, weakDay);
+check("gap leader is me", gap.leader, "me");
+check("gap delta matches totals", gap.delta, Math.round((strongDay.total - weakDay.total) * 10) / 10);
+check("every line accounted for", gap.lines.length, strongDay.lines.length);
+check("line deltas sum to total delta",
+  Math.round(gap.lines.reduce((a, l) => a + l.delta, 0) * 10) / 10, gap.delta);
+check("gains are all positive", gap.gains.every((l) => l.delta > 0), true);
+check("drops are all negative", gap.drops.every((l) => l.delta < 0), true);
+check("ordered by magnitude",
+  gap.lines.every((l, i) => i === 0 || Math.abs(gap.lines[i - 1].delta) >= Math.abs(l.delta)), true);
+check("protein gap has a concrete hint",
+  /g more protein/.test(gap.lines.find((l) => l.key === "protein")?.toClose ?? ""), true);
+
+const level = compareScores(strongDay, strongDay);
+check("identical days are level", level.leader, "level");
+check("identical days have no gains", level.gains.length, 0);
+
 console.log(fails === 0 ? "\nAll scoring checks passed." : `\n${fails} FAILED`);
 process.exit(fails === 0 ? 0 : 1);

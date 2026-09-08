@@ -9,6 +9,7 @@ import AdviceCard from "@/components/AdviceCard";
 import SleepCard from "@/components/SleepCard";
 import MicroPanel from "@/components/MicroPanel";
 import TodayTimeline from "@/components/TodayTimeline";
+import ScoreGap from "@/components/ScoreGap";
 import type { FoodLog, WorkoutLog } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -42,6 +43,7 @@ export default async function TodayPage() {
   const kcalOut = Math.round(totals?.kcal_out ?? 0);
   const protein = Math.round(totals?.protein_g ?? 0);
   const hasData = (totals?.meals ?? 0) > 0 || (totals?.sessions ?? 0) > 0;
+  const todayScoreLogged = score.logged;
 
   const prettyDate = new Date(today + "T00:00:00").toLocaleDateString("en-GB", {
     weekday: "long", day: "numeric", month: "long",
@@ -103,6 +105,25 @@ export default async function TodayPage() {
             hint={`${Math.round(totals?.active_minutes ?? 0)} min`} />
         </div>
       </section>
+
+      {/* ---------- why the gap ---------- */}
+      {them && theirScore && (todayScoreLogged || theirScore.logged) && (
+        <Section
+          title="Why the gap"
+          action={
+            <Link href={`/vs/${them.profile.id}`} className="text-xs font-semibold text-lime-glow">
+              Details
+            </Link>
+          }
+        >
+          <ScoreGap
+            mine={score}
+            theirs={theirScore}
+            theirName={them.profile.display_name.split(" ")[0]}
+            compact
+          />
+        </Section>
+      )}
 
       {/* ---------- what to do about it ---------- */}
       <Section title="For tomorrow">

@@ -193,3 +193,96 @@ export function dayOutcome(mine: DayScore, theirs: DayScore | null): DayOutcome 
   if (Math.abs(mine.total - theirs.total) < 0.05) return "tie";
   return mine.total > theirs.total ? "win" : "loss";
 }
+
+/* =====================================================================
+ * Why one of you beat the other.
+ *
+ * Deterministic on purpose: the score is arithmetic, so the explanation can
+ * be exact rather than a language model's guess. Every gap also carries the
+ * concrete amount needed to close it, derived from the same weights above.
+ * ===================================================================== */
+
+export interface GapLine {
+  key: ScoreLine["key"];
+  label: string;
+  mine: number;
+  theirs: number;
+  /** mine − theirs, in points */
+  delta: number;
+  mineDetail: string;
+  theirsDetail: string;
+  /** What the trailing side would have had to do. Null when level. */
+  toClose: string | null;
+}
+
+export interface ScoreGap {
+  delta: number;
+  leader: "me" | "them" | "level";
+  lines: GapLine[];
+  /** Where I gained ground, biggest first. */
+  gains: GapLine[];
+  /** Where I lost ground, biggest first. */
+  drops: GapLine[];
+}
+
+/** Roughly 5.3 kcal/min for brisk walking at 70 kg (MET 4.3). */
+const KCAL_PER_WALK_MIN = 5.3;
+
+function closeHint(key: ScoreLine["key"], pointsBehind: number): string | null {
+  if (pointsBehind <= 0) return null;
+  const p = pointsBehind;
+
+  switch (key) {
+    case "burn": {
+      const kcal = Math.round(p * SCORING.burn.kcalPerPoint);
+      const mins = Math.round(kcal / KCAL_PER_WALK_MIN);
+      return `${kcal} kcal more — about a ${mins}-minute brisk walk`;
+    }
+    case "protein": {
+      const grams = Math.round(p * SCORING.protein.gramsPerPoint);
+      return `${grams} g more protein — roughly ${Math.max(1, Math.round(grams / 18))} eggs, or ${Math.round(grams / 18) * 100} g of paneer`;
+    }
+    case "minutes":
+      return `${Math.round(p * SCORING.activeMinutes.minutesPerPoint)} more active minutes`;
+    case "net":
+      return "eat a little less, or train a little more, to close the calorie gap";
+    case "logging":
+      return "log both food and training — a rest day counts";
+    case "streak":
+      return "log something every day to build the streak back";
+    default:
+      return null;
+  }
+}
+
+export function compareScores(mine: DayScore, theirs: DayScore): ScoreGap {
+  const byKey = new Map(theirs.lines.map((l) => [l.key, l]));
+
+  const lines: GapLine[] = mine.lines.map((line) => {
+    const other = byKey.get(line.key);
+    const theirPoints = other?.points ?? 0;
+    const delta = round1(line.points - theirPoints);
+    return {
+      key: line.key,
+      label: line.label,
+      mine: line.points,
+      theirs: theirPoints,
+      delta,
+      mineDetail: line.detail,
+      theirsDetail: other?.detail ?? "—",
+      // The hint is addressed to whoever is behind on this line.
+      toClose: closeHint(line.key, Math.abs(delta)),
+    };
+  });
+
+  const ordered = [...lines].sort((a, b) => Math.abs(b.delta) - Math.abs(a.delta));
+  const delta = round1(mine.total - theirs.total);
+
+  return {
+    delta,
+    leader: Math.abs(delta) < 0.05 ? "level" : delta > 0 ? "me" : "them",
+    lines: ordered,
+    gains: ordered.filter((l) => l.delta > 0),
+    drops: ordered.filter((l) => l.delta < 0),
+  };
+}

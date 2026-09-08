@@ -33,7 +33,7 @@ export async function updateSession(request: NextRequest) {
   // round-trip on every icon request.
   if (isPublic || !url || !key) return response;
 
-  let user = null;
+  let user: { id: string } | null = null;
 
   try {
     // createServerClient validates the URL eagerly and throws before any
@@ -49,8 +49,13 @@ export async function updateSession(request: NextRequest) {
       },
     });
 
-    // Must run: this refreshes an expiring token and rewrites the cookies.
-    ({ data: { user } } = await supabase.auth.getUser());
+    // getClaims() verifies the JWT against the project's JWKS and can settle
+    // this without a network call at all; it falls back to the auth server on
+    // its own when the token cannot be checked locally. Either way it still
+    // refreshes an expiring token and rewrites the cookies.
+    const { data: claims, error } = await supabase.auth.getClaims();
+    if (error) throw error;
+    user = claims?.claims?.sub ? { id: claims.claims.sub } : null;
   } catch (err) {
     // Fail open rather than 500 the whole site. Every page under (app)
     // re-checks the profile server-side and bounces to /login, so an

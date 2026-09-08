@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { configuredModel, geminiConfigured } from "@/lib/gemini";
 import { supabaseAnonKey, supabaseUrl, supabaseUrlProblem } from "@/lib/env";
+import { createClient, supabaseConfigured } from "@/lib/supabase/server";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -25,6 +26,21 @@ export async function GET() {
 
   const key = supabaseAnonKey();
 
+  // Round-trip time from this server to Postgres. This is the number that
+  // decides whether the app feels fast: a Vercel function in us-east talking
+  // to a database in Asia pays this on every single query.
+  let dbMs: number | null = null;
+  if (supabaseConfigured()) {
+    const started = Date.now();
+    try {
+      const supabase = await createClient();
+      await supabase.from("profiles").select("id").limit(1);
+      dbMs = Date.now() - started;
+    } catch {
+      dbMs = null;
+    }
+  }
+
   return NextResponse.json({
     ok: !problem && Boolean(key) && geminiConfigured(),
     supabaseUrl: Boolean(url),
@@ -38,6 +54,8 @@ export async function GET() {
       // usually means a truncated paste or the wrong value entirely.
       anonKeyLength: key.length,
       anonKeyLooksLikeJwt: key.split(".").length === 3,
+      dbRoundTripMs: dbMs,
+      serverRegion: process.env.VERCEL_REGION ?? "local",
     },
   });
 }

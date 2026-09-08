@@ -54,41 +54,38 @@ function coerceTotals(r: Record<string, unknown>): DailyTotals {
 
 const EMPTY = {} as Record<string, number>;
 
-/**
- * PostgREST returns an embedded relation as either an object or a one-element
- * array depending on how it infers cardinality. Normalise both to one value.
- * Only safe where a real foreign key exists between the two tables.
- */
-function embedded<T>(value: unknown): T | null {
-  if (Array.isArray(value)) return (value[0] as T) ?? null;
-  return (value as T) ?? null;
-}
-
 export async function getMyProfile(): Promise<Profile | null> {
   if (!supabaseConfigured()) return null;
   try {
     const supabase = await createClient();
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return null;
-    const { data } = await supabase.from("profiles").select("*").eq("id", user.id).single();
+    // One round trip: the function reads auth.uid() straight from the JWT, so
+    // no separate "who am I" call is needed, and RLS still restricts the row.
+    const { data, error } = await supabase.rpc("get_my_profile");
+    if (error) {
+      if (error.code === "PGRST202" || /get_my_profile/.test(error.message)) {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) return null;
+        const { data: row } = await supabase
+          .from("profiles").select("*").eq("id", user.id).single();
+        return (row as Profile) ?? null;
+      }
+      console.error("getMyProfile failed —", error.message);
+      return null;
+    }
     return (data as Profile) ?? null;
   } catch (err) {
-    // A bad URL or an unreachable Supabase must not take the page down; the
-    // caller treats null as "signed out" and shows the login screen.
-    console.error("getMyProfile failed —", (err as Error).message);
+    console.error("getMyProfile threw —", (err as Error).message);
     return null;
   }
 }
 
 /**
- * Everything the dashboard, versus board and history need, in three queries.
- *
- * `windowDays` is how far back to load. Scores are derived here (not stored)
- * so tuning src/lib/scoring.ts re-scores all history instantly.
+ * The pre-v4 path: six sequential round trips. Kept only so a deploy that
+ * reaches production before the migration does still works.
  */
-export async function loadArena(windowDays = 30): Promise<Arena | null> {
-  if (!supabaseConfigured()) return null;
+async function loadArenaLegacy(windowDays: number): Promise<ArenaPayload | null> {
   const supabase = await createClient();
+
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return null;
 
@@ -97,75 +94,107 @@ export async function loadArena(windowDays = 30): Promise<Arena | null> {
   const me = meRow as Profile;
 
   const today = localDate(me.timezone);
-  const from = addDays(today, -(windowDays - 1));
-  const days = dateRange(from, today);
+  const fromDate = addDays(today, -(windowDays - 1));
 
-  // The challenge I'm in (most recent, if somehow several).
   const { data: memberships } = await supabase
     .from("challenge_members")
     .select("challenge_id, challenges(*)")
     .order("joined_at", { ascending: false })
     .limit(1);
 
-  const challenge = embedded<Challenge>(
-    (memberships?.[0] as Record<string, unknown> | undefined)?.challenges,
-  );
+  const raw = (memberships?.[0] as Record<string, unknown> | undefined)?.challenges;
+  const challenge = (Array.isArray(raw) ? raw[0] : raw) as Challenge | null;
 
-  // Everyone in it, subject to RLS: as owner that is every rival, as a rival
-  // it is just me and the owner.
-  //
-  // Two queries rather than one embedded select. PostgREST cannot embed
-  // profiles here — challenge_members.user_id and profiles.id both reference
-  // auth.users, but there is no foreign key BETWEEN those two tables, so the
-  // embed fails with PGRST200. That error used to be swallowed, leaving the
-  // roster as just me and the dashboard reporting "no rival yet" however many
-  // people had actually joined.
-  let profiles: Profile[] = [me];
-
+  let players: Profile[] = [me];
   if (challenge) {
-    const { data: memberRows, error: memberError } = await supabase
-      .from("challenge_members")
-      .select("user_id")
-      .eq("challenge_id", challenge.id);
-
-    if (memberError) {
-      console.error("loadArena: could not read challenge members —", memberError.message);
-    }
-
-    const memberIds = (memberRows ?? []).map((r) => String(r.user_id));
-
-    if (memberIds.length) {
-      const { data: profileRows, error: profileError } = await supabase
-        .from("profiles")
-        .select("*")
-        .in("id", memberIds);
-
-      if (profileError) {
-        console.error("loadArena: could not read profiles —", profileError.message);
-      }
-
+    const { data: memberRows } = await supabase
+      .from("challenge_members").select("user_id").eq("challenge_id", challenge.id);
+    const ids = (memberRows ?? []).map((r) => String(r.user_id));
+    if (ids.length) {
+      const { data: profileRows } = await supabase.from("profiles").select("*").in("id", ids);
       const found = (profileRows ?? []) as Profile[];
-      // Keep myself in the list even if RLS hides me from my own roster query.
-      if (found.length) {
-        profiles = found.some((p) => p.id === me.id) ? found : [me, ...found];
-      }
+      if (found.length) players = found.some((p) => p.id === me.id) ? found : [me, ...found];
     }
   }
 
-  const userIds = profiles.map((p) => p.id);
-
   const { data: totalRows } = await supabase
-    .from("daily_totals")
-    .select("*")
-    .in("user_id", userIds)
-    .gte("local_date", from)
-    .lte("local_date", today);
+    .from("daily_totals").select("*")
+    .in("user_id", players.map((p) => p.id))
+    .gte("local_date", fromDate).lte("local_date", today);
 
-  const totals = (totalRows ?? []).map((r) => coerceTotals(r as Record<string, unknown>));
+  return {
+    today,
+    from_date: fromDate,
+    me,
+    challenge,
+    players,
+    totals: (totalRows ?? []) as Record<string, unknown>[],
+  };
+}
 
-  // Group totals by player.
+interface ArenaPayload {
+  today: string;
+  from_date: string;
+  me: Profile;
+  challenge: Challenge | null;
+  players: Profile[];
+  totals: Record<string, unknown>[];
+}
+
+/**
+ * Everything the dashboard, versus board and history need — in ONE database
+ * round trip.
+ *
+ * This used to be six sequential queries (whoami, my profile, my challenge,
+ * its members, their profiles, the totals). With the Vercel function running
+ * in us-east and Supabase elsewhere, every one of those was a cross-region
+ * hop and the page took seconds to render.
+ *
+ * Scores are still derived here rather than stored, so tuning
+ * src/lib/scoring.ts re-scores all history instantly.
+ */
+export async function loadArena(windowDays = 30): Promise<Arena | null> {
+  if (!supabaseConfigured()) return null;
+
+  let payload: ArenaPayload | null = null;
+  try {
+    const supabase = await createClient();
+    const { data, error } = await supabase.rpc("get_arena", { days: windowDays });
+
+    if (error) {
+      // PGRST202 = the function is not in the schema cache, i.e. this database
+      // has not had the v4 migration applied yet. Fall back to the original
+      // query-by-query path so a deploy that lands before the SQL does not
+      // take the app down; it is slower, not broken.
+      if (error.code === "PGRST202" || /get_arena/.test(error.message)) {
+        console.warn(
+          "loadArena: get_arena() missing — using the slow multi-query path. " +
+            "Run supabase/schema.sql to restore one-round-trip loading.",
+        );
+        payload = await loadArenaLegacy(windowDays);
+      } else {
+        console.error("loadArena: get_arena failed —", error.message);
+        return null;
+      }
+    } else {
+      payload = data as ArenaPayload | null;
+    }
+  } catch (err) {
+    console.error("loadArena threw —", (err as Error).message);
+    return null;
+  }
+
+  if (!payload?.me) return null;
+
+  const me = payload.me;
+  const today = payload.today;
+  const days = dateRange(payload.from_date, today);
+
+  const profiles = payload.players?.length ? payload.players : [me];
+  const totals = (payload.totals ?? []).map(coerceTotals);
+
   const byUser = new Map<string, Map<string, DailyTotals>>();
-  userIds.forEach((id) => byUser.set(id, new Map()));
+  profiles.forEach((p) => byUser.set(p.id, new Map()));
   totals.forEach((t) => byUser.get(t.user_id)?.set(t.local_date, t));
 
   // First pass: score every day for every player.
@@ -197,16 +226,15 @@ export async function loadArena(windowDays = 30): Promise<Arena | null> {
   const players: PlayerView[] = drafts.map((d) => {
     let wins = 0, losses = 0, ties = 0, points = 0;
     for (const day of days) {
-      const mine = d.scores.get(day)!;
-      points += mine.total;
-      const rivals = drafts.filter((o) => o.profile.id !== d.profile.id);
-      if (!rivals.length) continue;
-      // Best rival score that day decides the day.
-      const best = rivals.reduce<DayScore | null>((acc, r) => {
-        const s = r.scores.get(day)!;
-        return !acc || s.total > acc.total ? s : acc;
+      const mineScore = d.scores.get(day)!;
+      points += mineScore.total;
+      const others = drafts.filter((o) => o.profile.id !== d.profile.id);
+      if (!others.length) continue;
+      const best = others.reduce<DayScore | null>((acc, r) => {
+        const sc = r.scores.get(day)!;
+        return !acc || sc.total > acc.total ? sc : acc;
       }, null);
-      const outcome = dayOutcome(mine, best);
+      const outcome = dayOutcome(mineScore, best);
       if (outcome === "win") wins++;
       else if (outcome === "loss") losses++;
       else if (outcome === "tie") ties++;
@@ -214,16 +242,11 @@ export async function loadArena(windowDays = 30): Promise<Arena | null> {
     return { ...d, wins, losses, ties, points: Math.round(points * 10) / 10 };
   });
 
-  // Me first, then by points.
   players.sort((a, b) => (b.isMe ? 1 : 0) - (a.isMe ? 1 : 0) || b.points - a.points);
 
-  return { me, challenge, players, days, today };
+  return { me, challenge: payload.challenge ?? null, players, days, today };
 }
 
-/**
- * Every rival visible to me. As the challenge owner that is all of them; as a
- * rival it is only the owner, because RLS never returns the others.
- */
 export function rivals(arena: Arena): PlayerView[] {
   return arena.players.filter((p) => !p.isMe);
 }
