@@ -1,9 +1,10 @@
 import "server-only";
+import { redirect } from "next/navigation";
 import { createClient, supabaseConfigured } from "./supabase/server";
 import { addDays, applyGoalsToTargets, dateRange, daysInMonthOf, deriveTargets, localDate } from "./calc";
 import { dayOutcome, scoreDay, streakEndingAt, type DayScore } from "./scoring";
 import { computeRecovery, type Recovery } from "./recovery";
-import { emptyDailyTotals, MICRO_KEYS, type Challenge, type DailyTotals, type MonthlyGoal, type Profile, type SleepQuality } from "./types";
+import { emptyDailyTotals, MICRO_KEYS, type Challenge, type DailyTotals, type FoodLog, type MonthlyGoal, type Profile, type SleepQuality, type WorkoutLog } from "./types";
 
 export interface PlayerView {
   profile: Profile;
@@ -29,6 +30,9 @@ export interface Arena {
   today: string;
   /** This month's goals for everyone visible. */
   goals: MonthlyGoal[];
+  /** My own entries for today, so the dashboard needs no follow-up query. */
+  todayFood: FoodLog[];
+  todayWorkouts: WorkoutLog[];
 }
 
 function num(v: unknown): number {
@@ -132,6 +136,13 @@ async function loadArenaLegacy(windowDays: number): Promise<ArenaPayload | null>
     .in("user_id", players.map((p) => p.id))
     .eq("month", today.slice(0, 8) + "01");
 
+  const [{ data: foodRows }, { data: workoutRows }] = await Promise.all([
+    supabase.from("food_logs").select("*")
+      .eq("user_id", me.id).eq("local_date", today).order("logged_at", { ascending: true }),
+    supabase.from("workout_logs").select("*")
+      .eq("user_id", me.id).eq("local_date", today).order("logged_at", { ascending: true }),
+  ]);
+
   return {
     today,
     from_date: fromDate,
@@ -140,6 +151,8 @@ async function loadArenaLegacy(windowDays: number): Promise<ArenaPayload | null>
     players,
     totals: (totalRows ?? []) as Record<string, unknown>[],
     goals: (goalRows ?? []) as MonthlyGoal[],
+    today_food: (foodRows ?? []) as FoodLog[],
+    today_workouts: (workoutRows ?? []) as WorkoutLog[],
   };
 }
 
@@ -151,6 +164,8 @@ interface ArenaPayload {
   players: Profile[];
   totals: Record<string, unknown>[];
   goals?: MonthlyGoal[];
+  today_food?: FoodLog[];
+  today_workouts?: WorkoutLog[];
 }
 
 /**
@@ -197,6 +212,28 @@ export async function loadArena(windowDays = 30): Promise<Arena | null> {
   }
 
   if (!payload?.me) return null;
+
+  // A database on v4/v5 has get_arena but not the v6 shape, so the call
+  // succeeds and simply omits today's entries. Detect the missing field
+  // rather than the missing function, or the timeline silently renders empty
+  // on a deploy that lands before the migration.
+  if (payload.today_food === undefined) {
+    try {
+      const supabase = await createClient();
+      const [{ data: foodRows }, { data: workoutRows }] = await Promise.all([
+        supabase.from("food_logs").select("*")
+          .eq("user_id", payload.me.id).eq("local_date", payload.today)
+          .order("logged_at", { ascending: true }),
+        supabase.from("workout_logs").select("*")
+          .eq("user_id", payload.me.id).eq("local_date", payload.today)
+          .order("logged_at", { ascending: true }),
+      ]);
+      payload.today_food = (foodRows ?? []) as FoodLog[];
+      payload.today_workouts = (workoutRows ?? []) as WorkoutLog[];
+    } catch (err) {
+      console.warn("loadArena: could not backfill today's logs —", (err as Error).message);
+    }
+  }
 
   const me = payload.me;
   const today = payload.today;
@@ -296,7 +333,16 @@ export async function loadArena(windowDays = 30): Promise<Arena | null> {
 
   players.sort((a, b) => (b.isMe ? 1 : 0) - (a.isMe ? 1 : 0) || b.points - a.points);
 
-  return { me, challenge: payload.challenge ?? null, players, days, today, goals: payload.goals ?? [] };
+  return {
+    me,
+    challenge: payload.challenge ?? null,
+    players,
+    days,
+    today,
+    goals: payload.goals ?? [],
+    todayFood: payload.today_food ?? [],
+    todayWorkouts: payload.today_workouts ?? [],
+  };
 }
 
 export function rivals(arena: Arena): PlayerView[] {
@@ -313,4 +359,18 @@ export function rival(arena: Arena): PlayerView | null {
 
 export function mine(arena: Arena): PlayerView {
   return arena.players.find((p) => p.isMe)!;
+}
+
+/**
+ * Load the arena and enforce the gates in one go.
+ *
+ * The (app) layout used to fetch the profile purely to check `onboarded`,
+ * which cost a whole round trip before the page even started its own. The
+ * arena already carries that flag, so the check is free here.
+ */
+export async function requireArena(windowDays = 30): Promise<Arena> {
+  const arena = await loadArena(windowDays);
+  if (!arena) redirect("/login");
+  if (!arena.me.onboarded) redirect("/onboarding");
+  return arena;
 }

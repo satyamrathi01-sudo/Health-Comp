@@ -637,3 +637,89 @@ from auth.users u
 left join public.profiles p on p.id = u.id
 where p.id is null
 on conflict (id) do nothing;
+
+-- =====================================================================
+-- v6 — fold today's logs into get_arena.
+--
+-- The Today screen was still making a second and third query for today's
+-- food and workout rows after get_arena had already returned. Returning
+-- them here removes another sequential round trip; RLS applies exactly as
+-- before, since the function stays SECURITY INVOKER.
+-- =====================================================================
+create or replace function public.get_arena(days integer default 30)
+returns jsonb
+language plpgsql
+stable
+security invoker
+set search_path = public
+as $$
+declare
+  uid        uuid := auth.uid();
+  me_row     public.profiles;
+  ch         public.challenges;
+  member_ids uuid[];
+  today      date;
+  from_date  date;
+begin
+  if uid is null then
+    return null;
+  end if;
+
+  select * into me_row from public.profiles where id = uid;
+  if not found then
+    return null;
+  end if;
+
+  today     := (now() at time zone coalesce(me_row.timezone, 'Asia/Kolkata'))::date;
+  from_date := today - (greatest(coalesce(days, 30), 1) - 1);
+
+  select c.* into ch
+  from public.challenge_members m
+  join public.challenges c on c.id = m.challenge_id
+  where m.user_id = uid
+  order by m.joined_at desc
+  limit 1;
+
+  if ch.id is not null then
+    select array_agg(m.user_id) into member_ids
+      from public.challenge_members m
+     where m.challenge_id = ch.id;
+  end if;
+
+  if member_ids is null then
+    member_ids := array[uid];
+  end if;
+
+  return jsonb_build_object(
+    'today',     today,
+    'from_date', from_date,
+    'me',        to_jsonb(me_row),
+    'challenge', case when ch.id is null then null else to_jsonb(ch) end,
+    'players',   coalesce(
+                   (select jsonb_agg(to_jsonb(p) order by p.created_at)
+                      from public.profiles p
+                     where p.id = any(member_ids)), '[]'::jsonb),
+    'totals',    coalesce(
+                   (select jsonb_agg(to_jsonb(t))
+                      from public.daily_totals t
+                     where t.user_id = any(member_ids)
+                       and t.local_date between from_date and today), '[]'::jsonb),
+    'goals',     coalesce(
+                   (select jsonb_agg(to_jsonb(g))
+                      from public.monthly_goals g
+                     where g.user_id = any(member_ids)
+                       and g.month = date_trunc('month', today)::date), '[]'::jsonb),
+    -- Today's own entries, so the dashboard needs no follow-up queries.
+    'today_food', coalesce(
+                   (select jsonb_agg(to_jsonb(f) order by f.logged_at)
+                      from public.food_logs f
+                     where f.user_id = uid and f.local_date = today), '[]'::jsonb),
+    'today_workouts', coalesce(
+                   (select jsonb_agg(to_jsonb(w) order by w.logged_at)
+                      from public.workout_logs w
+                     where w.user_id = uid and w.local_date = today), '[]'::jsonb)
+  );
+end;
+$$;
+
+grant execute on function public.get_arena(integer) to authenticated;

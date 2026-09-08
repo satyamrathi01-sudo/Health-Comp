@@ -1,4 +1,4 @@
-import { loadArena, mine, rival } from "@/lib/data";
+import { mine, requireArena, rival } from "@/lib/data";
 import { createClient } from "@/lib/supabase/server";
 import { ageFrom, applyGoalsToTargets, daysInMonthOf, deriveTargets } from "@/lib/calc";
 import { DataRow, Metric, PageHeader, Section } from "@/components/ui";
@@ -11,8 +11,7 @@ export const dynamic = "force-dynamic";
 export const metadata = { title: "Me · FitClash" };
 
 export default async function MePage() {
-  const arena = await loadArena(30);
-  if (!arena) return null;
+  const arena = await requireArena(30);
 
   const supabase = await createClient();
   const me = mine(arena);

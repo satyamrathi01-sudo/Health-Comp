@@ -1,15 +1,15 @@
-import { redirect } from "next/navigation";
 import BottomNav from "@/components/BottomNav";
-import { getMyProfile } from "@/lib/data";
 
-export default async function AppLayout({ children }: { children: React.ReactNode }) {
-  const profile = await getMyProfile();
-
-  // proxy.ts already bounced anonymous visitors; this covers the gap where a
-  // session exists but the profile row hasn't been filled in yet.
-  if (!profile) redirect("/login");
-  if (!profile.onboarded) redirect("/onboarding");
-
+/**
+ * Deliberately does no data fetching.
+ *
+ * It used to load the profile just to check `onboarded`, which added a full
+ * database round trip in front of every page's own query — and layouts render
+ * before pages, so it was pure added latency on every navigation. Each page
+ * calls requireArena(), which gets the same flag out of the query it was
+ * making anyway. Anonymous requests are still turned away by proxy.ts.
+ */
+export default function AppLayout({ children }: { children: React.ReactNode }) {
   return (
     <>
       <main className="safe-top mx-auto w-full max-w-md px-4">{children}</main>

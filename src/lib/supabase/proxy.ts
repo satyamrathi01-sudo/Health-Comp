@@ -49,13 +49,15 @@ export async function updateSession(request: NextRequest) {
       },
     });
 
-    // getClaims() verifies the JWT against the project's JWKS and can settle
-    // this without a network call at all; it falls back to the auth server on
-    // its own when the token cannot be checked locally. Either way it still
-    // refreshes an expiring token and rewrites the cookies.
-    const { data: claims, error } = await supabase.auth.getClaims();
-    if (error) throw error;
-    user = claims?.claims?.sub ? { id: claims.claims.sub } : null;
+    // getSession() reads the session straight out of the cookie and only
+    // contacts the auth server when the token has actually expired and needs
+    // refreshing. getClaims() and getUser() both round-trip far more often.
+    //
+    // This is a redirect gate, not an authorisation boundary: every query the
+    // pages make is still filtered by RLS against the verified JWT, so a
+    // forged cookie gets past this check and then sees nothing.
+    const { data: { session } } = await supabase.auth.getSession();
+    user = session?.user ? { id: session.user.id } : null;
   } catch (err) {
     // Fail open rather than 500 the whole site. Every page under (app)
     // re-checks the profile server-side and bounces to /login, so an

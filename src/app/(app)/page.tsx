@@ -1,6 +1,5 @@
 import Link from "next/link";
-import { createClient } from "@/lib/supabase/server";
-import { loadArena, mine, rival, rivals } from "@/lib/data";
+import { mine, requireArena, rival, rivals } from "@/lib/data";
 import { deriveTargets } from "@/lib/calc";
 import { MAX_BASE_SCORE } from "@/lib/scoring";
 import { DataRow, EmptyState, Metric, PageHeader, Ring, Section, StreakBadge } from "@/components/ui";
@@ -11,7 +10,6 @@ import RecoveryCard from "@/components/RecoveryCard";
 import MicroPanel from "@/components/MicroPanel";
 import TodayTimeline from "@/components/TodayTimeline";
 import ScoreGap from "@/components/ScoreGap";
-import type { FoodLog, WorkoutLog } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 
@@ -19,21 +17,11 @@ const YOU = "var(--color-lime-glow)";
 const THEM = "var(--color-flame)";
 
 export default async function TodayPage() {
-  const arena = await loadArena(30);
-  if (!arena) return null;
-
-  const supabase = await createClient();
+  const arena = await requireArena(30);
   const me = mine(arena);
   const them = rival(arena);
   const others = rivals(arena);
   const today = arena.today;
-
-  const [{ data: foods }, { data: workouts }] = await Promise.all([
-    supabase.from("food_logs").select("*").eq("user_id", arena.me.id)
-      .eq("local_date", today).order("logged_at", { ascending: true }),
-    supabase.from("workout_logs").select("*").eq("user_id", arena.me.id)
-      .eq("local_date", today).order("logged_at", { ascending: true }),
-  ]);
 
   const score = me.scores.get(today)!;
   const totals = me.totals.get(today) ?? null;
@@ -172,13 +160,10 @@ export default async function TodayPage() {
         title="Logged today"
         action={<Link href="/log" className="text-xs font-semibold text-lime-glow">Add</Link>}
       >
-        {(foods?.length ?? 0) + (workouts?.length ?? 0) === 0 ? (
+        {arena.todayFood.length + arena.todayWorkouts.length === 0 ? (
           <EmptyState icon="○" title="Nothing logged yet" />
         ) : (
-          <TodayTimeline
-            foods={(foods ?? []) as FoodLog[]}
-            workouts={(workouts ?? []) as WorkoutLog[]}
-          />
+          <TodayTimeline foods={arena.todayFood} workouts={arena.todayWorkouts} />
         )}
       </Section>
 

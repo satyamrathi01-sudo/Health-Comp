@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { loadArena, mine } from "@/lib/data";
+import { mine, requireArena } from "@/lib/data";
 import { dayOutcome } from "@/lib/scoring";
 import { EmptyState, PageHeader, Section } from "@/components/ui";
 import ScoreGap from "@/components/ScoreGap";
@@ -12,8 +12,7 @@ const THEM = "var(--color-flame)";
 
 export default async function OneOnOnePage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const arena = await loadArena(30);
-  if (!arena) return null;
+  const arena = await requireArena(30);
 
   const me = mine(arena);
   // RLS decides who is even loadable, so an unreachable rival is a genuine 404

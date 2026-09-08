@@ -1,4 +1,4 @@
-import { loadArena, mine, rival } from "@/lib/data";
+import { mine, requireArena, rival } from "@/lib/data";
 import { createClient } from "@/lib/supabase/server";
 import { EmptyState, PageHeader, Section } from "@/components/ui";
 import GoalsBoard, { type GoalSuggestion } from "@/components/GoalsBoard";
@@ -37,8 +37,7 @@ function progressFor(
 }
 
 export default async function GoalsPage() {
-  const arena = await loadArena(31);
-  if (!arena) return null;
+  const arena = await requireArena(31);
 
   const supabase = await createClient();
   const me = mine(arena);
@@ -48,15 +47,13 @@ export default async function GoalsPage() {
   const monthStart = arena.today.slice(0, 8) + "01";
   const userIds = arena.players.map((p) => p.profile.id);
 
-  const [{ data: goalRows }, { data: weighIns }] = await Promise.all([
-    supabase.from("monthly_goals").select("*")
-      .in("user_id", userIds).eq("month", monthStart)
-      .order("created_at", { ascending: true }),
-    supabase.from("weigh_ins").select("user_id, weight_kg, local_date")
-      .in("user_id", userIds).order("local_date", { ascending: false }),
-  ]);
+  // get_arena already returned this month's goals for everyone visible, so
+  // only the weigh-ins still need fetching.
+  const { data: weighIns } = await supabase
+    .from("weigh_ins").select("user_id, weight_kg, local_date")
+    .in("user_id", userIds).order("local_date", { ascending: false });
 
-  const goals = (goalRows ?? []) as MonthlyGoal[];
+  const goals = arena.goals;
 
   const latestWeight = (userId: string): number | null => {
     const row = (weighIns ?? []).find((w) => w.user_id === userId);

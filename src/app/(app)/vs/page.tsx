@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { loadArena, mine, rival, rivals, type PlayerView } from "@/lib/data";
+import { mine, requireArena, rival, rivals, type PlayerView } from "@/lib/data";
 import { EmptyState, PageHeader, Section } from "@/components/ui";
 import type { DayScore } from "@/lib/scoring";
 
@@ -10,8 +10,7 @@ const YOU = "var(--color-lime-glow)";
 const THEM = "var(--color-flame)";
 
 export default async function VersusPage() {
-  const arena = await loadArena(30);
-  if (!arena) return null;
+  const arena = await requireArena(30);
 
   const me = mine(arena);
   const them = rival(arena);
