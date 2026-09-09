@@ -289,7 +289,10 @@ const nothing = compareProtein({
   mineItems: [], theirItems: [], mineTarget: 150, theirTarget: 150, theirName: "Riya",
 });
 check("nothing logged is handled", nothing.empty, true);
-check("and says something useful", /once you have both logged/i.test(nothing.explain), true);
+// The card now fills as soon as EITHER side logs, so the empty copy must not
+// tell people to wait for both.
+check("and says something useful", /either of you logs/i.test(nothing.explain), true);
+check("and does not ask for both", /both/i.test(nothing.explain), false);
 
 // The same food logged at two meals is one line, summed.
 const folded = foldSources([

@@ -17,7 +17,9 @@ export default function ProteinVersus({
 }: {
   comparison: ProteinComparison;
   theirName: string;
-  /** What the numbers cover, e.g. "today" or "the last 14 days". */
+  /** What the numbers cover, e.g. "Today" or "Last 14 days". Rendered
+   * above the headline rather than under it: "136 g ahead" means nothing
+   * until you know whether it is one morning or a fortnight. */
   scope: string;
 }) {
   const c = comparison;
@@ -25,6 +27,7 @@ export default function ProteinVersus({
   if (c.empty) {
     return (
       <div className="surface px-5 py-6 text-center">
+        <p className="eyebrow mb-2">{scope}</p>
         <p className="text-xs leading-relaxed text-mist-600">{c.explain}</p>
       </div>
     );
@@ -35,6 +38,7 @@ export default function ProteinVersus({
   return (
     <div className="surface overflow-hidden">
       <div className="hair-b px-5 py-4">
+        <p className="eyebrow mb-1.5">{scope}</p>
         <div className="flex items-baseline justify-between gap-3">
           <p className="text-base font-semibold leading-snug text-white">{c.headline}</p>
           {Math.abs(c.pointsGap) >= 0.1 && (
@@ -47,7 +51,6 @@ export default function ProteinVersus({
             </span>
           )}
         </div>
-        <p className="mt-1 text-[0.65rem] text-mist-600">Protein, {scope}</p>
       </div>
 
       {/* ---- each side against their own target ---- */}

@@ -13,11 +13,12 @@ export const metadata = { title: "Versus · FitClash" };
 const YOU = "var(--color-lime-glow)";
 const THEM = "var(--color-flame)";
 
-/** How far back the food breakdown looks when today is thin. */
-const FOOD_WINDOW = 14;
 
 export default async function VersusPage() {
-  const arena = await requireArena({ days: 30, foodDays: FOOD_WINDOW });
+  // foodDays: 1 — this screen compares today and only today, so there is no
+  // reason to ship a fortnight of items it will never read. The full
+  // fortnight lives one tap away on /vs/[id].
+  const arena = await requireArena({ days: 30, foodDays: 1 });
 
   const me = mine(arena);
   const them = rival(arena);
@@ -54,18 +55,16 @@ export default async function VersusPage() {
   const todayMine = me.scores.get(arena.today)!;
   const todayTheirs = them.scores.get(arena.today)!;
 
-  // Today when there is a today worth reading; otherwise the fortnight. The
-  // point of this card is to name a food, and one thin morning names nothing.
-  const bothLoggedToday =
-    itemsFor(arena, arena.me.id, arena.today).length > 0 &&
-    itemsFor(arena, them.profile.id, arena.today).length > 0;
-
-  const scope = bothLoggedToday ? "today" : `the last ${FOOD_WINDOW} days`;
-  const date = bothLoggedToday ? arena.today : undefined;
-
+  // Always today, including when today is empty.
+  //
+  // This used to widen to a fortnight whenever the two of you had not BOTH
+  // logged, which meant every morning opened on a two-week total under a
+  // headline that read like a live standing — and logging your own breakfast
+  // did not clear it, because it was still waiting on the other person. A
+  // card about today should start the day empty and fill as you eat.
   const protein = compareProtein({
-    mineItems: itemsFor(arena, arena.me.id, date),
-    theirItems: itemsFor(arena, them.profile.id, date),
+    mineItems: itemsFor(arena, arena.me.id, arena.today),
+    theirItems: itemsFor(arena, them.profile.id, arena.today),
     // Each side against their own target, which is the whole basis of the
     // score. Their target is published; their body is not.
     mineTarget: me.targets?.proteinTarget ?? 0,
@@ -158,7 +157,7 @@ export default async function VersusPage() {
           </Link>
         }
       >
-        <ProteinVersus comparison={protein} theirName={firstName} scope={scope} />
+        <ProteinVersus comparison={protein} theirName={firstName} scope="Today" />
       </Section>
 
       {/* ---------- why today looks the way it does ---------- */}

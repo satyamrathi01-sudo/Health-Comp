@@ -61,7 +61,9 @@ export default async function OneOnOnePage({ params }: { params: Promise<{ id: s
   };
 
   // Both scopes here, because they answer different questions: today is what
-  // you can still act on, the fortnight is where the pattern lives.
+  // you can still act on, the fortnight is where the pattern lives. Today is
+  // shown even when it is empty — a day that has not started yet is a fact,
+  // and hiding the card would leave the fortnight looking like today.
   const todayProtein = compareProtein({
     ...proteinArgs,
     mineItems: itemsFor(arena, arena.me.id, arena.today),
@@ -106,17 +108,15 @@ export default async function OneOnOnePage({ params }: { params: Promise<{ id: s
       </section>
 
       {/* ---------- what actually made the protein gap ---------- */}
-      {!todayProtein.empty && (
-        <Section title="Protein today, food by food">
-          <ProteinVersus comparison={todayProtein} theirName={firstName} scope="today" />
-        </Section>
-      )}
+      <Section title="Protein, food by food">
+        <ProteinVersus comparison={todayProtein} theirName={firstName} scope="Today" />
+      </Section>
 
-      <Section title={`Protein over ${FOOD_WINDOW} days`}>
+      <Section title="The pattern">
         <ProteinVersus
           comparison={windowProtein}
           theirName={firstName}
-          scope={`the last ${FOOD_WINDOW} days`}
+          scope={`Last ${FOOD_WINDOW} days`}
         />
       </Section>
 

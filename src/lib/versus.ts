@@ -222,7 +222,7 @@ function headlineFor(
   theirEdge: SourceGap[],
   theirName: string,
 ): string {
-  if (empty) return "Nothing logged to compare";
+  if (empty) return "Nothing logged yet";
   if (Math.abs(gapG) < MIN_MEANINGFUL_G) return "Level on protein";
   if (gapG < 0) return `You are ${Math.abs(gapG)} g of protein ahead`;
   const top = theirEdge[0];
@@ -239,7 +239,7 @@ function explainFor(o: {
   name: string;
   swap: ProteinSwap | null;
 }): string {
-  if (o.empty) return "Once you have both logged a meal, this breaks the difference down food by food.";
+  if (o.empty) return "The moment either of you logs a meal, this breaks the difference down food by food.";
   if (Math.abs(o.gapG) < MIN_MEANINGFUL_G) return "Neither of you is getting protein from anywhere the other is not.";
 
   if (o.gapG < 0) {
