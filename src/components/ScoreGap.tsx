@@ -1,7 +1,5 @@
 import { compareScores, type DayScore } from "@/lib/scoring";
-
-const YOU = "var(--color-lime-glow)";
-const THEM = "var(--color-flame)";
+import GapLineRow from "./GapLine";
 
 /**
  * Why the scores differ, line by line. Pure arithmetic over the same weights
@@ -56,46 +54,11 @@ export default function ScoreGap({
       </div>
 
       <div className="px-5">
-        {(compact ? gap.lines.filter((l) => l.delta !== 0) : gap.lines).map((line, i) => {
-          const ahead = line.delta > 0;
-          const level = line.delta === 0;
-          return (
-            <div key={line.key} className={i > 0 ? "hair py-3" : "py-3"}>
-              <div className="flex items-baseline justify-between gap-3">
-                <span className="text-sm text-mist-200">{line.label}</span>
-                <span
-                  className="tnum text-xs font-bold"
-                  style={{ color: level ? "var(--color-mist-600)" : ahead ? YOU : THEM }}
-                >
-                  {level ? "level" : `${ahead ? "+" : ""}${line.delta}`}
-                </span>
-              </div>
-
-              <div className="mt-1.5 flex items-center gap-2">
-                <span className="tnum w-10 shrink-0 text-right text-[0.68rem]" style={{ color: YOU }}>
-                  {line.mine}
-                </span>
-                <div className="flex h-[3px] flex-1 overflow-hidden rounded-full bg-ink-800">
-                  <div
-                    style={{
-                      width: `${line.mine + line.theirs > 0 ? (line.mine / (line.mine + line.theirs)) * 100 : 50}%`,
-                      background: YOU,
-                    }}
-                  />
-                  <div className="flex-1" style={{ background: THEM }} />
-                </div>
-                <span className="tnum w-10 shrink-0 text-[0.68rem]" style={{ color: THEM }}>
-                  {line.theirs}
-                </span>
-              </div>
-
-              <div className="mt-1 flex justify-between gap-3 text-[0.62rem] text-mist-600">
-                <span>{line.mineDetail}</span>
-                <span>{line.theirsDetail}</span>
-              </div>
-            </div>
-          );
-        })}
+        {(compact ? gap.lines.filter((l) => l.delta !== 0) : gap.lines).map((line, i) => (
+          <div key={line.key} className={i > 0 ? "hair" : ""}>
+            <GapLineRow line={line} />
+          </div>
+        ))}
       </div>
 
       {behindLine?.toClose && (

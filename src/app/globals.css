@@ -207,3 +207,23 @@ select.field {
   .rise, .thinking, .water-wave { animation: none; }
   .btn:active:not(:disabled) { transform: none; }
 }
+
+/* ---------------------------------------------------------------------
+ * Day-by-day fixtures on Versus.
+ *
+ * The whole row is the disclosure, so the browser's default triangle would
+ * be a second, redundant affordance sitting in front of the date. The
+ * chevron at the end turns instead.
+ * ------------------------------------------------------------------- */
+.day-versus > summary {
+  list-style: none;
+  cursor: pointer;
+}
+.day-versus > summary::-webkit-details-marker { display: none; }
+
+.day-versus > summary .chev { transition: transform 140ms ease; }
+.day-versus[open] > summary .chev { transform: rotate(90deg); }
+
+@media (prefers-reduced-motion: reduce) {
+  .day-versus > summary .chev { transition: none; }
+}

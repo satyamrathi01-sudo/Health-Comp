@@ -5,7 +5,7 @@ import { EmptyState, PageHeader, Section } from "@/components/ui";
 import ChallengeSwitcher from "@/components/ChallengeSwitcher";
 import ProteinVersus from "@/components/ProteinVersus";
 import ScoreGap from "@/components/ScoreGap";
-import type { DayScore } from "@/lib/scoring";
+import DayVersus from "@/components/DayVersus";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Versus · FitClash" };
@@ -169,17 +169,20 @@ export default async function VersusPage() {
       )}
 
       {/* ---------- fixtures ---------- */}
-      <Section title={others.length > 1 ? `Day by day · vs ${firstName}` : "Day by day"}>
+      <Section
+        title={others.length > 1 ? `Day by day · vs ${firstName}` : "Day by day"}
+        action={<span className="text-[0.65rem] text-mist-600">tap a day</span>}
+      >
         {days.length === 0 ? (
           <EmptyState icon="○" title="Nothing logged yet" body="First one to log takes the lead." />
         ) : (
           <div className="surface px-5">
             {days.map((day, i) => (
-              <DayRow
+              <DayVersus
                 key={day}
                 day={day}
-                a={me.scores.get(day)!}
-                b={them.scores.get(day)!}
+                mine={me.scores.get(day)!}
+                theirs={them.scores.get(day)!}
                 isToday={day === arena.today}
                 first={i === 0}
               />
@@ -209,56 +212,6 @@ function Side({
       {player.streak > 0 && (
         <div className="tnum mt-0.5 text-[0.65rem] text-gold">🔥 {player.streak}</div>
       )}
-    </div>
-  );
-}
-
-function DayRow({
-  day, a, b, isToday, first,
-}: { day: string; a: DayScore; b: DayScore; isToday: boolean; first: boolean }) {
-  const label = isToday
-    ? "Today"
-    : new Date(day + "T00:00:00").toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short" });
-
-  const diff = a.total - b.total;
-  const played = a.logged || b.logged;
-  const result = Math.abs(diff) < 0.05 ? "draw" : diff > 0 ? "won" : "lost";
-
-  if (!played) {
-    return (
-      <div className={`flex items-center gap-3 ${first ? "py-3" : "hair py-3"} opacity-40`}>
-        <span className="w-[5.5rem] shrink-0 text-[0.7rem] text-mist-600">{label}</span>
-        <span className="flex-1 text-center text-[0.7rem] text-mist-600">not logged</span>
-      </div>
-    );
-  }
-
-  return (
-    <div className={`flex items-center gap-3 ${first ? "py-3" : "hair py-3"}`}>
-      <span className="w-[5.5rem] shrink-0 text-[0.7rem] text-mist-600">{label}</span>
-      <span className="tnum w-8 text-right text-sm font-bold" style={{ color: YOU }}>
-        {Math.round(a.total)}
-      </span>
-      <div className="flex h-[3px] flex-1 overflow-hidden rounded-full bg-ink-800">
-        <div
-          style={{
-            width: `${a.total + b.total > 0 ? (a.total / (a.total + b.total)) * 100 : 50}%`,
-            background: YOU,
-          }}
-        />
-        <div className="flex-1" style={{ background: THEM }} />
-      </div>
-      <span className="tnum w-8 text-sm font-bold" style={{ color: THEM }}>
-        {Math.round(b.total)}
-      </span>
-      <span
-        className="w-6 shrink-0 text-right text-[0.65rem] font-bold uppercase"
-        style={{
-          color: result === "won" ? YOU : result === "lost" ? THEM : "var(--color-mist-600)",
-        }}
-      >
-        {result === "won" ? "W" : result === "lost" ? "L" : "D"}
-      </span>
     </div>
   );
 }

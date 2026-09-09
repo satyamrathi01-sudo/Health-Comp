@@ -1,11 +1,12 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { itemsFor, mine, requireArena } from "@/lib/data";
-import { dayOutcome } from "@/lib/scoring";
+import { dayOutcome, type DayScore } from "@/lib/scoring";
 import { compareProtein } from "@/lib/versus";
 import { EmptyState, PageHeader, Section } from "@/components/ui";
 import ScoreGap from "@/components/ScoreGap";
 import ProteinVersus from "@/components/ProteinVersus";
+import DayVersus from "@/components/DayVersus";
 
 export const dynamic = "force-dynamic";
 
@@ -32,22 +33,21 @@ export default async function OneOnOnePage({ params }: { params: Promise<{ id: s
     : arena.days[0];
 
   let wins = 0, losses = 0, draws = 0;
-  const fixtures: { day: string; a: number; b: number; outcome: string; played: boolean }[] = [];
+  // The whole DayScore is kept, not just its total: each row opens into the
+  // metrics behind it, and those live on the score itself.
+  const fixtures: { day: string; a: DayScore; b: DayScore }[] = [];
   for (const day of arena.days) {
     if (day < firstDay) continue;
     const a = me.scores.get(day)!;
     const b = them.scores.get(day)!;
-    const played = a.logged || b.logged;
-    if (played) {
+    if (a.logged || b.logged) {
       const outcome = dayOutcome(a, b);
       if (outcome === "win") wins++;
       else if (outcome === "loss") losses++;
       else if (outcome === "tie") draws++;
-      fixtures.push({ day, a: a.total, b: b.total, outcome, played });
-    } else {
-      // Kept, dimmed: a missed day is information, not an absence.
-      fixtures.push({ day, a: 0, b: 0, outcome: "none", played });
     }
+    // Missed days are kept and dimmed: a gap is information, not an absence.
+    fixtures.push({ day, a, b });
   }
   fixtures.reverse();
 
@@ -126,45 +126,23 @@ export default async function OneOnOnePage({ params }: { params: Promise<{ id: s
       </Section>
 
       {/* ---------- fixtures ---------- */}
-      <Section title="Every day">
+      <Section
+        title="Every day"
+        action={<span className="text-[0.65rem] text-mist-600">tap a day</span>}
+      >
         {fixtures.length === 0 ? (
           <EmptyState icon="○" title="No logged days yet" />
         ) : (
           <div className="surface px-5">
             {fixtures.map((f, i) => (
-              <div key={f.day}
-                className={`flex items-center gap-3 ${i > 0 ? "hair py-3" : "py-3"} ${f.played ? "" : "opacity-40"}`}>
-                <span className="w-[5.5rem] shrink-0 text-[0.7rem] text-mist-600">
-                  {f.day === arena.today
-                    ? "Today"
-                    : new Date(f.day + "T00:00:00").toLocaleDateString("en-GB", {
-                        weekday: "short", day: "numeric", month: "short",
-                      })}
-                </span>
-                {!f.played && (
-                  <span className="flex-1 text-center text-[0.7rem] text-mist-600">not logged</span>
-                )}
-                {f.played && (
-                <span className="tnum w-8 text-right text-sm font-bold" style={{ color: YOU }}>
-                  {Math.round(f.a)}
-                </span>)}
-                {f.played && (<>
-                <div className="flex h-[3px] flex-1 overflow-hidden rounded-full bg-ink-800">
-                  <div style={{ width: `${f.a + f.b > 0 ? (f.a / (f.a + f.b)) * 100 : 50}%`, background: YOU }} />
-                  <div className="flex-1" style={{ background: THEM }} />
-                </div>
-                <span className="tnum w-8 text-sm font-bold" style={{ color: THEM }}>
-                  {Math.round(f.b)}
-                </span>
-                <span
-                  className="w-5 shrink-0 text-right text-[0.65rem] font-bold uppercase"
-                  style={{
-                    color: f.outcome === "win" ? YOU : f.outcome === "loss" ? THEM : "var(--color-mist-600)",
-                  }}
-                >
-                  {f.outcome === "win" ? "W" : f.outcome === "loss" ? "L" : "D"}
-                </span></>)}
-              </div>
+              <DayVersus
+                key={f.day}
+                day={f.day}
+                mine={f.a}
+                theirs={f.b}
+                isToday={f.day === arena.today}
+                first={i === 0}
+              />
             ))}
           </div>
         )}
