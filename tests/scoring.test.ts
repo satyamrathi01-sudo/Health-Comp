@@ -21,26 +21,26 @@ check("empty day not logged", scoreDay(null, "2026-09-07", 0).logged, false);
 const cheat = scoreDay(T({ kcal_out: 900, active_minutes: 90, sessions: 1 }), "2026-09-07", 0);
 const netLine = cheat.lines.find((l) => l.key === "net")!;
 check("no food => zero net points", netLine.points, 0);
-// burn 35 (capped) + minutes 12 (capped) + protein 0 + net 0 + logging 5 (training only)
-check("workout-only day total", cheat.total, 52);
+// burn 25 (capped) + minutes 10 (capped) + protein 0 + net 0 + logging 5 (training only)
+check("workout-only day total", cheat.total, 40);
 
 // 3. A strong, complete day
 const strong = scoreDay(
   T({ kcal_in: 2100, protein_g: 140, meals: 3, kcal_out: 500, active_minutes: 70, sessions: 1 }),
   "2026-09-07", 5,
 );
-// burn 35 + min 12 + protein 25 + net(2100-500=1600 => 0) + logging 10 = 82, +5 streak
-check("strong day base", strong.base, 82);
+// burn 25 + min 10 + protein 25 + net(2100-500=1600 => 0) + logging 10 = 70, +5 streak
+check("strong day base", strong.base, 70);
 check("strong day bonus", strong.bonus, 5);
-check("strong day total", strong.total, 87);
+check("strong day total", strong.total, 75);
 
 // 4. Deficit day: eats less than burns
 const deficit = scoreDay(
   T({ kcal_in: 400, protein_g: 60, meals: 2, kcal_out: 500, active_minutes: 60, sessions: 1 }),
   "2026-09-07", 0,
 );
-// burn 35 + min 12 + protein 12 + net(-100 <= 0 => 18) + logging 10 = 87
-check("deficit day scores net max", deficit.base, 87);
+// burn 25 + min 10 + protein 12 + net(-100 <= 0 => 18) + logging 10 = 75
+check("deficit day scores net max", deficit.base, 75);
 
 // 5. Rest day earns the training half of logging, no burn
 const rest = scoreDay(T({ kcal_in: 1800, protein_g: 100, meals: 3, is_rest_day: true }), "2026-09-07", 0);
@@ -65,10 +65,76 @@ check("both empty => none", dayOutcome(scoreDay(null, "d"), scoreDay(null, "d"))
 
 // 9. Caps really cap
 const monster = scoreDay(
-  T({ kcal_in: 100, protein_g: 500, meals: 5, kcal_out: 5000, active_minutes: 400, sessions: 3 }),
+  T({ kcal_in: 100, protein_g: 500, meals: 5, kcal_out: 5000, active_minutes: 400,
+      sessions: 3, fiber_g: 200 }),
   "2026-09-07", 0,
 );
-check("everything capped => exactly 100", monster.base, 100);
+// Raw mode cannot reach 100: ceilings and micronutrient aims only exist when
+// targets are published, so 7 of the 100 are simply not on offer.
+check("raw mode tops out at 93", monster.base, 93);
+check("and says the limits line was not scored",
+  monster.lines.find((l) => l.key === "limits")!.max, 0);
+check("nor the micronutrient line",
+  monster.lines.find((l) => l.key === "micros")!.max, 0);
+
+// The real ceiling claim: with targets published, a perfect day is exactly
+// MAX_BASE_SCORE. If a weight is ever changed without changing the total,
+// this is the test that catches it.
+const perfectTargets = {
+  burnTarget: 400, proteinTarget: 150, kcalTarget: 2400, minutesTarget: 60,
+  fibreTarget: 34,
+  ceilings: [
+    { key: "sugar_g", label: "Added sugar", limit: 60 },
+    { key: "satfat_g", label: "Saturated fat", limit: 27 },
+  ],
+  microAims: [
+    { key: "iron_mg", label: "Iron", atRest: 19, perSweat: 0, maxSweatAdd: 0 },
+    { key: "zinc_mg", label: "Zinc", atRest: 17, perSweat: 0, maxSweatAdd: 0 },
+  ],
+};
+const perfect = scoreDay(
+  T({
+    kcal_in: 2400, protein_g: 200, meals: 4, kcal_out: 600, active_minutes: 90,
+    sessions: 2, fiber_g: 40, sugar_g: 10, satfat_g: 5, iron_mg: 25, zinc_mg: 20,
+  }),
+  "2026-09-07", 0, perfectTargets,
+);
+check("a perfect scored day is exactly MAX_BASE_SCORE", perfect.base, MAX_BASE_SCORE);
+
+// Blowing a ceiling costs points; doubling it costs the whole share of them.
+const sugary = scoreDay(
+  T({ ...perfect.targets ? {} : {}, kcal_in: 2400, protein_g: 200, meals: 4, kcal_out: 600,
+      active_minutes: 90, sessions: 2, fiber_g: 40, sugar_g: 120, satfat_g: 5,
+      iron_mg: 25, zinc_mg: 20 }),
+  "2026-09-07", 0, perfectTargets,
+);
+check("doubling a ceiling forfeits half the limits line",
+  sugary.lines.find((l) => l.key === "limits")!.points, 2);
+check("and the line names what went over",
+  /added sugar/i.test(sugary.lines.find((l) => l.key === "limits")!.detail), true);
+
+// Micronutrients are scored on the mean shortfall, not a count of aims hit.
+const halfMicros = scoreDay(
+  T({ kcal_in: 2400, protein_g: 200, meals: 4, fiber_g: 40, sugar_g: 10, satfat_g: 5,
+      iron_mg: 19, zinc_mg: 0 }),
+  "2026-09-07", 0, perfectTargets,
+);
+check("one aim of two met scores half the micro line",
+  halfMicros.lines.find((l) => l.key === "micros")!.points, 1.5);
+check("and reports the count", 
+  halfMicros.lines.find((l) => l.key === "micros")!.detail, "1 of 2 aims met");
+
+// The sweat term is added back from the day's own burn, which is what lets a
+// rival's aim be reconstructed without publishing their body.
+const sweatTargets = { ...perfectTargets, microAims: [
+  { key: "sodium_mg", label: "Sodium", atRest: 100, perSweat: 0.5, maxSweatAdd: 400 },
+]};
+const sweaty = scoreDay(
+  T({ kcal_in: 2400, meals: 2, kcal_out: 400, sodium_mg: 300 }), "2026-09-07", 0, sweatTargets,
+);
+// aim = 100 + min(400, 400*0.5) = 300, so 300 mg exactly meets it.
+check("burn raises the aim it is measured against",
+  sweaty.lines.find((l) => l.key === "micros")!.detail, "1 of 1 aims met");
 
 
 // ---- score gap ----
@@ -108,16 +174,16 @@ const smallBurn = scoreDay(T({ kcal_out: 300, sessions: 1 }), "d", 0, SMALL);
 const bigBurnLine   = bigBurn.lines.find((l) => l.key === "burn")!;
 const smallBurnLine = smallBurn.lines.find((l) => l.key === "burn")!;
 
-check("600/800 scores 75% of the burn max", bigBurnLine.points, 26.3);
-check("300/300 scores the full burn max", smallBurnLine.points, 35);
+check("600/800 scores 75% of the burn max", bigBurnLine.points, 18.8);
+check("300/300 scores the full burn max", smallBurnLine.points, 25);
 check("smaller person burning less still wins the line",
   smallBurnLine.points > bigBurnLine.points, true);
 
 // Hitting your own target is a full mark regardless of the absolute number.
 check("big hitting 800 maxes burn",
-  scoreDay(T({ kcal_out: 800, sessions: 1 }), "d", 0, BIG).lines.find((l) => l.key === "burn")!.points, 35);
+  scoreDay(T({ kcal_out: 800, sessions: 1 }), "d", 0, BIG).lines.find((l) => l.key === "burn")!.points, 25);
 check("burn cannot exceed its max",
-  scoreDay(T({ kcal_out: 5000, sessions: 1 }), "d", 0, SMALL).lines.find((l) => l.key === "burn")!.points, 35);
+  scoreDay(T({ kcal_out: 5000, sessions: 1 }), "d", 0, SMALL).lines.find((l) => l.key === "burn")!.points, 25);
 
 // Protein scales the same way.
 check("85/170 protein scores half",

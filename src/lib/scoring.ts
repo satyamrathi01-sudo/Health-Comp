@@ -25,8 +25,13 @@ import type { DailyTotals } from "./types.ts";
 
 export const SCORING = {
 
-  burn: { kcalPerPoint: 10, max: 35 }, // 350 kcal burned = full marks
-  activeMinutes: { minutesPerPoint: 5, max: 12 }, // 60 min = full marks
+  // Burn and minutes were 35 and 12. They came down because they were the
+  // two lines that saturated: against your own target, anyone who trains at
+  // all tends to max both, so 47 points routinely decided nothing between
+  // two people who had both been to the gym. The 12 points freed pay for the
+  // three nutrition lines below, which actually separate two logged days.
+  burn: { kcalPerPoint: 10, max: 25 },
+  activeMinutes: { minutesPerPoint: 5, max: 10 },
   protein: { gramsPerPoint: 5, max: 25 }, // 125 g = full marks
 
   /** net = kcal eaten − kcal burned. Only scores once food is logged. */
@@ -51,6 +56,34 @@ export const SCORING = {
     adherenceFloor: 3,
   },
 
+  /**
+   * Against your own fibre aim — 14 g per 1,000 kcal you aim to eat. The
+   * per-gram rate is the raw-mode fallback, on the same footing as burn's
+   * kcalPerPoint: 30 g of fibre is full marks when no target is known.
+   */
+  fibre: { gramsPerPoint: 6, max: 5 },
+
+  /**
+   * Added sugar and saturated fat, each capped at 10% of your own calories.
+   * Full marks for staying under both; nothing once you are double either.
+   * Sodium is tracked but not scored here — its ceiling scales with
+   * bodyweight, which a rival does not publish, and a line that can only be
+   * computed for one of the two people is worse than no line.
+   */
+  limits: { max: 4 },
+
+  /**
+   * The nine "eat enough of this" micronutrients, each against an aim scaled
+   * to that person and to what they sweated out today.
+   *
+   * Deliberately the smallest line on the board. These figures are estimated
+   * per meal by a language model rather than measured, so they are the least
+   * trustworthy numbers the app holds; scoring them at all is a judgement
+   * that eating a varied day should count for something, not a claim that
+   * the iron figure is accurate to the milligram.
+   */
+  micros: { max: 3 },
+
   /** Showing up at all. Split so a rest day still earns the training half. */
   logging: { food: 5, training: 5 },
 
@@ -63,10 +96,43 @@ export const MAX_BASE_SCORE =
   SCORING.activeMinutes.max +
   SCORING.protein.max +
   SCORING.netCalories.max +
+  SCORING.fibre.max +
+  SCORING.limits.max +
+  SCORING.micros.max +
   SCORING.logging.food +
   SCORING.logging.training; // === 100
 
-/** One player's personal targets, from deriveTargets() in calc.ts. */
+/** A ceiling worth points for staying under. Limit is in the field's own unit. */
+export interface ScoredCeiling {
+  key: string;
+  label: string;
+  limit: number;
+}
+
+/**
+ * One micronutrient aim, in the two parts it is actually made of.
+ *
+ * `atRest` is what gets published on a card; the sweat term is added back
+ * here from the burn the day actually recorded. Splitting it this way is
+ * what lets a rival's aim be reconstructed exactly for any day without
+ * their body ever being published — see publishedMicroAims() in calc.ts.
+ */
+export interface ScoredMicroAim {
+  key: string;
+  label: string;
+  atRest: number;
+  /** Added per kcal burned, up to maxSweatAdd. */
+  perSweat: number;
+  maxSweatAdd: number;
+}
+
+/**
+ * One player's personal targets, from deriveTargets() in calc.ts.
+ *
+ * The nutrition entries arrive prepared rather than derived here on purpose:
+ * this module stays pure arithmetic with no runtime imports, so every table
+ * of nutrition constants lives in calc.ts where the rest of them are.
+ */
 export interface ScoreTargets {
   burnTarget: number;
   proteinTarget: number;
@@ -77,10 +143,16 @@ export interface ScoreTargets {
    * falls back to absolute scoring rather than to zero.
    */
   minutesTarget?: number;
+  /** Grams of fibre. Derived from the calorie target, so always knowable. */
+  fibreTarget?: number;
+  /** Ceilings worth points for staying under. Empty means the line is skipped. */
+  ceilings?: ScoredCeiling[];
+  /** Aims worth points for reaching. Empty means the line is skipped. */
+  microAims?: ScoredMicroAim[];
 }
 
 export interface ScoreLine {
-  key: "burn" | "minutes" | "protein" | "net" | "logging" | "streak";
+  key: "burn" | "minutes" | "protein" | "net" | "fibre" | "limits" | "micros" | "logging" | "streak";
   label: string;
   detail: string;
   points: number;
@@ -100,6 +172,14 @@ export interface DayScore {
 }
 
 const round1 = (n: number) => Math.round(n * 10) / 10;
+
+/** A numeric column of the totals row by name, for the table-driven lines. */
+function field(t: DailyTotals | null, key: string): number {
+  if (!t) return 0;
+  const v = (t as unknown as Record<string, unknown>)[key];
+  const n = typeof v === "number" ? v : Number(v ?? 0);
+  return Number.isFinite(n) ? n : 0;
+}
 
 function capped(value: number, per: number, max: number): number {
   if (!(value > 0) || !(per > 0)) return 0;
@@ -121,6 +201,7 @@ export function scoreDay(
   const meals = t?.meals ?? 0;
   const sessions = t?.sessions ?? 0;
   const isRestDay = t?.is_rest_day ?? false;
+  const fibreG = t?.fiber_g ?? 0;
 
   const hasFood = meals > 0;
   const trained = sessions > 0;
@@ -170,6 +251,63 @@ export function scoreDay(
     netDetail = `${net > 0 ? "+" : ""}${Math.round(net)} kcal`;
   }
 
+  /* ---------------- fibre ---------------- */
+  const fibreTarget = rel?.fibreTarget ?? 0;
+  let fibrePoints = 0;
+  let fibreDetail = "no food logged";
+
+  if (hasFood && fibreTarget > 0) {
+    fibrePoints = round1(Math.min(1, fibreG / fibreTarget) * SCORING.fibre.max);
+    fibreDetail = `${Math.round(fibreG)} / ${fibreTarget} g`;
+  } else if (hasFood) {
+    fibrePoints = capped(fibreG, SCORING.fibre.gramsPerPoint, SCORING.fibre.max);
+    fibreDetail = `${Math.round(fibreG)} g`;
+  }
+
+  /* ---------------- ceilings ---------------- */
+  // Staying under is worth full marks; the credit falls away linearly and is
+  // gone once you are at double. A cliff at exactly the limit would make one
+  // extra spoonful cost as much as an entire second helping.
+  const ceilings = rel?.ceilings ?? [];
+  let limitPoints = 0;
+  let limitDetail = "no food logged";
+
+  if (hasFood && ceilings.length > 0) {
+    let credit = 0;
+    const breached: string[] = [];
+    for (const c of ceilings) {
+      const value = field(t, c.key);
+      const ratio = c.limit > 0 ? value / c.limit : 0;
+      credit += ratio <= 1 ? 1 : Math.max(0, 2 - ratio);
+      if (ratio > 1) {
+        breached.push(`${c.label.toLowerCase()} +${Math.round(value - c.limit)}`);
+      }
+    }
+    limitPoints = round1((credit / ceilings.length) * SCORING.limits.max);
+    limitDetail = breached.length > 0 ? breached.join(" · ") : "all under";
+  }
+
+  /* ---------------- micronutrients ---------------- */
+  // Scored on the mean shortfall rather than a count of aims hit, so missing
+  // one nutrient badly reads differently from missing three narrowly. The
+  // detail line still reports the count, which is what a person can act on.
+  const microAims = rel?.microAims ?? [];
+  let microPoints = 0;
+  let microDetail = "no food logged";
+
+  if (hasFood && microAims.length > 0) {
+    let sum = 0;
+    let met = 0;
+    for (const a of microAims) {
+      const aim = a.atRest + Math.min(a.maxSweatAdd, Math.max(0, kcalOut) * a.perSweat);
+      const ratio = aim > 0 ? field(t, a.key) / aim : 0;
+      sum += Math.min(1, ratio);
+      if (ratio >= 1) met++;
+    }
+    microPoints = round1((sum / microAims.length) * SCORING.micros.max);
+    microDetail = `${met} of ${microAims.length} aims met`;
+  }
+
   /* ---------------- showing up ---------------- */
   const loggingPoints =
     (hasFood ? SCORING.logging.food : 0) +
@@ -204,6 +342,29 @@ export function scoreDay(
       max: SCORING.netCalories.max,
     },
     {
+      key: "fibre",
+      label: "Fibre",
+      detail: fibreDetail,
+      points: fibrePoints,
+      max: SCORING.fibre.max,
+    },
+    {
+      key: "limits",
+      label: "Sugar & sat fat",
+      detail: ceilings.length > 0 ? limitDetail : "needs a calorie target",
+      points: limitPoints,
+      // No ceilings means no target was published, and a line showing 0 / 4
+      // would report a shortfall against points that were never on offer.
+      max: ceilings.length > 0 ? SCORING.limits.max : 0,
+    },
+    {
+      key: "micros",
+      label: "Micronutrients",
+      detail: microAims.length > 0 ? microDetail : "needs published aims",
+      points: microPoints,
+      max: microAims.length > 0 ? SCORING.micros.max : 0,
+    },
+    {
       key: "minutes",
       label: "Active minutes",
       detail: minutesTarget > 0
@@ -230,7 +391,9 @@ export function scoreDay(
     },
   ];
 
-  const base = round1(burn + minutes + protein + netPoints + loggingPoints);
+  const base = round1(
+    burn + minutes + protein + netPoints + fibrePoints + limitPoints + microPoints + loggingPoints,
+  );
 
   return {
     date,
@@ -346,6 +509,14 @@ function closeHint(
       return targets
         ? `land closer to your ${targets.kcalTarget} kcal target`
         : "eat a little less, or train a little more, to close the calorie gap";
+    case "fibre":
+      return targets?.fibreTarget
+        ? `${Math.round(p * (targets.fibreTarget / SCORING.fibre.max))} g more fibre — a katori of dal, or a guava`
+        : "more fibre — dal, whole fruit, or a millet roti";
+    case "limits":
+      return "keep added sugar and saturated fat under their ceilings";
+    case "micros":
+      return "a more varied plate — the aims you missed are listed on Today";
     case "logging":
       return "log both food and training — a rest day counts";
     case "streak":
@@ -402,7 +573,7 @@ export function compareScores(mine: DayScore, theirs: DayScore): ScoreGap {
  * ===================================================================== */
 
 export type ImpactComponent =
-  | "burn" | "protein" | "calories" | "minutes" | "logging" | "sleep" | "water" | "micros" | "none";
+  | "burn" | "protein" | "calories" | "minutes" | "fibre" | "logging" | "sleep" | "water" | "micros" | "none";
 
 export interface Impact {
   component: ImpactComponent;
@@ -413,9 +584,11 @@ export interface Impact {
 /** The fields scoreDay actually reads, so no zeroed row needs constructing. */
 function readable(t: DailyTotals | null): DailyTotals {
   return {
+    ...(t ?? {}),
     kcal_in: t?.kcal_in ?? 0,
     kcal_out: t?.kcal_out ?? 0,
     protein_g: t?.protein_g ?? 0,
+    fiber_g: t?.fiber_g ?? 0,
     active_minutes: t?.active_minutes ?? 0,
     meals: t?.meals ?? 0,
     sessions: t?.sessions ?? 0,
@@ -436,11 +609,16 @@ function withImpact(t: DailyTotals | null, impact: Impact): DailyTotals {
       return { ...base, protein_g: Math.max(0, base.protein_g + amount), meals: Math.max(1, base.meals) };
     case "calories":
       return { ...base, kcal_in: Math.max(0, base.kcal_in + amount), meals: Math.max(1, base.meals) };
+    case "fibre":
+      return { ...base, fiber_g: Math.max(0, base.fiber_g + amount), meals: Math.max(1, base.meals) };
     case "logging":
       return { ...base, meals: Math.max(1, base.meals), sessions: Math.max(1, base.sessions) };
-    // Sleep, water and micronutrients are tracked but not scored, so they
-    // are worth zero points by construction — and saying so is more honest
-    // than inventing a number.
+    // Sleep and water are tracked but not scored, so they are worth zero by
+    // construction. Micronutrients ARE scored now, but a suggestion to "eat
+    // more micros" names no nutrient and carries no number, so there is
+    // nothing to re-score — saying zero is still more honest than inventing
+    // a figure. A suggestion naming a specific nutrient should come through
+    // as that nutrient, not as this catch-all.
     default:
       return base;
   }

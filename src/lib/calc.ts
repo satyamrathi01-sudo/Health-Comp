@@ -1,4 +1,5 @@
 import type { ActivityLevel, Exercise, Goal, PlayerCard, Profile, Sex } from "./types.ts";
+import type { ScoreTargets } from "./scoring.ts";
 
 /** Multipliers applied to BMR to get maintenance calories. */
 const ACTIVITY_FACTOR: Record<ActivityLevel, number> = {
@@ -393,6 +394,7 @@ export interface PublishedTargets {
   target_protein_g: number | null;
   target_burn_kcal: number | null;
   target_active_minutes: number | null;
+  target_micros: Record<string, number> | null;
 }
 
 export function publishedTargets(p: Profile, today?: string): PublishedTargets {
@@ -401,6 +403,7 @@ export function publishedTargets(p: Profile, today?: string): PublishedTargets {
     return {
       target_kcal: null, target_protein_g: null,
       target_burn_kcal: null, target_active_minutes: null,
+      target_micros: null,
     };
   }
   return {
@@ -408,6 +411,9 @@ export function publishedTargets(p: Profile, today?: string): PublishedTargets {
     target_protein_g: t.proteinTarget,
     target_burn_kcal: t.burnTarget,
     target_active_minutes: t.minutesTarget || null,
+    // At rest: the sweat term is day-dependent and is added back when the day
+    // is scored, so what is published stays valid for every day.
+    target_micros: publishedMicroAims(p.sex, p.weight_kg, t.kcalTarget),
   };
 }
 
@@ -416,7 +422,10 @@ export function publishedTargetsMatch(p: Profile, published: PublishedTargets): 
     p.target_kcal === published.target_kcal &&
     p.target_protein_g === published.target_protein_g &&
     p.target_burn_kcal === published.target_burn_kcal &&
-    p.target_active_minutes === published.target_active_minutes
+    p.target_active_minutes === published.target_active_minutes &&
+    // Compared as text: this is a dozen rounded numbers in a fixed key order,
+    // so a string match is exact here and avoids a deep-equality helper.
+    JSON.stringify(p.target_micros ?? null) === JSON.stringify(published.target_micros ?? null)
   );
 }
 
@@ -817,22 +826,145 @@ export function applyGoalsToTargets(
  * their published card — so the same day scores identically on both our
  * screens.
  */
+/**
+ * Where the micronutrient aims for one player come from.
+ *
+ * Two shapes because there are two cases and they are not symmetrical: for
+ * MYSELF the body is in hand and the aims are derived from it; for a RIVAL
+ * only what they published is available. `published` wins when it is there,
+ * since it was computed from their real sex and weight.
+ */
+export interface MicroSource {
+  sex?: SexT | null;
+  weightKg?: number | null;
+  /** A rival's published rest-state aims, straight off their card. */
+  published?: Record<string, number> | null;
+}
+
 export function scoreTargetsFrom(
   base: DerivedTargets | null,
   goals: GoalLike[],
   daysInMonth: number,
-): { burnTarget: number; proteinTarget: number; kcalTarget: number; minutesTarget: number } | null {
+  micro?: MicroSource | null,
+): ScoreTargets | null {
   if (!base) return null;
   const t = applyGoalsToTargets(base, goals, daysInMonth);
+
+  // Falls back to aims scaled by the calorie target alone when nothing has
+  // been published — imperfect, but a scored line that reads zero because a
+  // rival has not opened the app since the migration would be worse. Their
+  // next page load republishes and the aims sharpen.
+  const published =
+    micro?.published && Object.keys(micro.published).length > 0
+      ? micro.published
+      : publishedMicroAims(micro?.sex ?? null, micro?.weightKg ?? null, t.kcalTarget);
+
   return {
     burnTarget: t.burnTarget,
     proteinTarget: t.proteinTarget,
     kcalTarget: t.kcalTarget,
     minutesTarget: t.minutesTarget,
+    fibreTarget: fibreTargetFor(t.kcalTarget),
+    ceilings: scoredCeilings(t.kcalTarget).map((c) => ({
+      key: c.key,
+      label: MICRO_REFS.find((r) => r.key === c.key)?.label ?? c.key,
+      limit: c.limit,
+    })),
+    microAims: MICRO_AIM_REFS.map((ref) => ({
+      key: ref.key,
+      label: ref.label,
+      atRest: Number(published[ref.key] ?? 0),
+      perSweat: ref.perSweat,
+      maxSweatAdd: ref.maxSweatAdd,
+    })).filter((a) => a.atRest > 0),
   };
 }
 
 export function daysInMonthOf(isoDate: string): number {
   const d = new Date(isoDate + "T00:00:00Z");
   return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 0)).getUTCDate();
+}
+
+/* =====================================================================
+ * What the score needs that a calorie target alone does not carry.
+ *
+ * Three of the scored lines — fibre, the ceilings, and micronutrients —
+ * are judged against aims that have to be known for a RIVAL too, not just
+ * for yourself. That is the whole constraint these helpers exist under:
+ * their body never reaches this process, so every aim below is either a
+ * function of the calorie target they already publish, or published
+ * outright on their card.
+ * ===================================================================== */
+
+/** The "eat enough of this" micronutrients. Ceilings are scored separately. */
+export const MICRO_AIM_REFS = MICRO_REFS.filter((r) => r.mode === "aim");
+
+/** The two ceilings that are pure functions of a calorie target. */
+export const SCORED_CEILING_REFS = MICRO_REFS.filter(
+  (r) => r.mode === "limit" && r.energyShare && r.kcalPerGram,
+);
+
+/**
+ * Fibre, from the calorie target.
+ *
+ * The same formula deriveTargets() uses, pulled out so a rival's aim and
+ * your own cannot drift apart. A hand-typed fiber_target_g does not survive
+ * onto a card — nothing about someone else's manual overrides is published —
+ * so their fibre line is scored against the derived figure. That is the same
+ * compromise every published target already makes.
+ */
+export function fibreTargetFor(kcalTarget: number): number {
+  if (!(kcalTarget > 0)) return 0;
+  return clamp(
+    Math.round((kcalTarget / 1000) * FIBER_PER_1000_KCAL),
+    FIBER_RANGE.min,
+    FIBER_RANGE.max,
+  );
+}
+
+/**
+ * Added sugar and saturated fat, each 10% of the calorie target.
+ *
+ * Sodium is deliberately NOT here even though it is a ceiling: it scales
+ * with bodyweight, which a rival does not publish. Scoring a line that can
+ * only be computed for one of the two people is worse than not scoring it.
+ */
+export function scoredCeilings(kcalTarget: number): { key: keyof Micros; limit: number }[] {
+  if (!(kcalTarget > 0)) return [];
+  return SCORED_CEILING_REFS.map((ref) => ({
+    key: ref.key,
+    limit: microTarget(ref, null, { kcalTarget, weightKg: null, exerciseKcal: 0 }),
+  }));
+}
+
+/**
+ * Micronutrient aims AT REST, which is the form that gets published.
+ *
+ * The sweat term is left off on purpose. It is additive and depends only on
+ * the calories burned — not on the body — so a rival's aim for a particular
+ * day is reconstructed exactly by adding it back from the burn their totals
+ * already show. Publishing one number per nutrient therefore costs nothing
+ * in accuracy, and publishing a per-day figure would be impossible anyway.
+ */
+export function publishedMicroAims(
+  sex: SexT | null,
+  weightKg: number | null,
+  kcalTarget: number,
+): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const ref of MICRO_AIM_REFS) {
+    out[ref.key] = microTarget(ref, sex, { kcalTarget, weightKg, exerciseKcal: 0 });
+  }
+  return out;
+}
+
+/** A published rest-state aim, put back on the day it is being scored on. */
+export function microAimForDay(
+  ref: MicroRef,
+  publishedAtRest: number,
+  exerciseKcal: number,
+): number {
+  if (!(publishedAtRest > 0)) return 0;
+  const burned = Math.max(0, Number(exerciseKcal) || 0);
+  return publishedAtRest + Math.min(ref.maxSweatAdd, burned * ref.perSweat);
 }

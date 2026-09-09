@@ -1369,3 +1369,49 @@ update public.profiles
    and target_burn_kcal is not null
    and weight_kg is not null
    and weight_kg > 0;
+
+-- ---------------------------------------------------------------------
+-- v9 — the score grows three nutrition lines, so a card grows one column.
+--
+-- Fibre and the sugar / saturated-fat ceilings need nothing new: all three
+-- are functions of the calorie target that is already published. Micro-
+-- nutrient aims are not. They scale with sex and bodyweight, neither of
+-- which leaves this database, so a rival could not otherwise be scored on
+-- the line at all.
+--
+-- What is published is the aim AT REST. The sweat component is additive and
+-- depends only on calories burned — a number the daily totals already carry
+-- — so the aim for any particular day is reconstructed exactly at scoring
+-- time. One column, no per-day rows, and the body stays where it was.
+--
+-- This is the same trade every other target already makes, and it is worth
+-- restating plainly: publishing an aim narrows what the body behind it can
+-- be. target_protein_g already did that far more sharply, being weight times
+-- a factor of 1.6, 1.8 or 2.0. Nothing here is a new category of disclosure.
+-- ---------------------------------------------------------------------
+alter table public.profiles
+  add column if not exists target_micros jsonb;
+
+drop view if exists public.player_cards;
+
+create view public.player_cards
+with (security_invoker = false) as
+select
+  p.id,
+  p.display_name,
+  p.avatar_emoji,
+  p.created_at,
+  p.target_kcal,
+  p.target_protein_g,
+  p.target_burn_kcal,
+  p.target_active_minutes,
+  p.target_micros
+from public.profiles p
+where public.can_see(p.id);
+
+grant select on public.player_cards to authenticated;
+
+-- No backfill. Unlike target_active_minutes there is no arithmetic here that
+-- SQL can do as well as calc.ts, and a wrong aim scores worse than a missing
+-- one: scoreTargetsFrom() falls back to aims scaled by the calorie target
+-- alone until each person's next page load republishes the real figures.

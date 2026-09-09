@@ -10,7 +10,9 @@ const THEM = "var(--color-flame)";
  * unreadable: you cannot follow protein down the list if it moves rows every
  * day. Fixed order turns the expanded days into a column you can scan.
  */
-const ORDER: ScoreLine["key"][] = ["burn", "protein", "net", "minutes", "logging", "streak"];
+const ORDER: ScoreLine["key"][] = [
+  "burn", "minutes", "protein", "net", "fibre", "limits", "micros", "logging", "streak",
+];
 const RANK = new Map(ORDER.map((k, i) => [k, i]));
 
 function label(day: string, isToday: boolean): string {

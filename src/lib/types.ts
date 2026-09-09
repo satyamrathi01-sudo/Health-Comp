@@ -43,6 +43,7 @@ export interface Profile {
   target_protein_g: number | null;
   target_burn_kcal: number | null;
   target_active_minutes: number | null;
+  target_micros: Record<string, number> | null;
 }
 
 /**
@@ -62,6 +63,15 @@ export interface PlayerCard {
   target_protein_g: number | null;
   target_burn_kcal: number | null;
   target_active_minutes: number | null;
+  /**
+   * Rest-state micronutrient aims, keyed by column name.
+   *
+   * Published because the micros line is scored, and scoring a rival needs
+   * their aims — which depend on sex and weight, neither of which leaves the
+   * database. This is the same trade the other targets already make: the aim
+   * is published, the body behind it is not.
+   */
+  target_micros: Record<string, number> | null;
 }
 
 /** Every profile is also a valid card — this is the narrowing. */
@@ -71,6 +81,7 @@ export function toPlayerCard(p: Profile | PlayerCard): PlayerCard {
     display_name: p.display_name,
     avatar_emoji: p.avatar_emoji,
     created_at: p.created_at,
+    target_micros: p.target_micros ?? null,
     target_kcal: p.target_kcal,
     target_protein_g: p.target_protein_g,
     target_burn_kcal: p.target_burn_kcal,

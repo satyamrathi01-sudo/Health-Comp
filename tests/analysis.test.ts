@@ -37,6 +37,7 @@ const person = (over: Partial<Profile> = {}): Profile => ({
   bmr_override: null, kcal_target_override: null,
   protein_target_g: null, carbs_target_g: null, fat_target_g: null, fiber_target_g: null,
   burn_target_override: null, minutes_target_override: null, water_target_ml: null,
+  target_micros: null,
   weight_goal_kg: null, weight_goal_date: null,
   weight_goal_start_kg: null, weight_goal_set_on: null,
   target_kcal: null, target_protein_g: null, target_burn_kcal: null,
@@ -155,21 +156,25 @@ check("intake never falls below the floor",
 /* ===================== what a rival may see ===================== */
 
 const published = publishedTargets(person(), TODAY);
-check("publishes exactly four numbers", Object.keys(published).sort(),
-  ["target_active_minutes", "target_burn_kcal", "target_kcal", "target_protein_g"]);
+check("publishes targets and nothing else", Object.keys(published).sort(),
+  ["target_active_minutes", "target_burn_kcal", "target_kcal", "target_micros",
+   "target_protein_g"]);
+// The aims are published; the sex and weight they were computed FROM are not.
+check("the published aims are a bag of numbers", 
+  Object.values(published.target_micros ?? {}).every((v) => typeof v === "number" && v > 0), true);
 check("and they match the derived ones", published.target_protein_g, auto.proteinTarget);
 
 const card = cardTargets({
   id: "them", display_name: "Riya", avatar_emoji: "⚡", created_at: "2026-01-01",
   target_kcal: 1800, target_protein_g: 110, target_burn_kcal: 300,
-  target_active_minutes: 55,
+  target_active_minutes: 55, target_micros: null,
 })!;
 check("a card scores against its own published targets", card.kcalTarget, 1800);
 check("a card carries no body at all", [card.bmi, card.plan], [null, null]);
 check("an un-onboarded card has no targets",
   cardTargets({ id: "x", display_name: "x", avatar_emoji: "x", created_at: "",
     target_kcal: null, target_protein_g: null, target_burn_kcal: null,
-    target_active_minutes: null }), null);
+    target_active_minutes: null, target_micros: null }), null);
 
 /* ===================== ceilings ===================== */
 
@@ -540,18 +545,18 @@ check("the target is bounded either way",
 const minuteTargets = { burnTarget: 400, proteinTarget: 150, kcalTarget: 2200, minutesTarget: 40 };
 const halfDone = scoreDay(T({ active_minutes: 20, sessions: 1 }), "d", 0, minuteTargets);
 check("half your own minutes target is half the points",
-  halfDone.lines.find((l) => l.key === "minutes")!.points, 6);
+  halfDone.lines.find((l) => l.key === "minutes")!.points, 5);
 check("and the line says what it was measured against",
   halfDone.lines.find((l) => l.key === "minutes")!.detail, "20 / 40 min");
 check("hitting it maxes the line",
   scoreDay(T({ active_minutes: 40, sessions: 1 }), "d", 0, minuteTargets)
-    .lines.find((l) => l.key === "minutes")!.points, 12);
+    .lines.find((l) => l.key === "minutes")!.points, 10);
 
 // A card published before this existed must not score zero minutes.
 const legacy = { burnTarget: 400, proteinTarget: 150, kcalTarget: 2200 };
 check("no published target falls back to the flat hour",
   scoreDay(T({ active_minutes: 60, sessions: 1 }), "d", 0, legacy)
-    .lines.find((l) => l.key === "minutes")!.points, 12);
+    .lines.find((l) => l.key === "minutes")!.points, 10);
 
 
 console.log(fails === 0 ? "\nAll analysis checks passed." : `\n${fails} FAILED`);

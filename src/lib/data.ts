@@ -97,7 +97,19 @@ function coerceCard(r: Record<string, unknown>): PlayerCard {
     target_protein_g: int(r.target_protein_g),
     target_burn_kcal: int(r.target_burn_kcal),
     target_active_minutes: int(r.target_active_minutes),
+    target_micros: coerceMicroAims(r.target_micros),
   };
+}
+
+/** A published aims object, kept only if it is actually a bag of numbers. */
+function coerceMicroAims(v: unknown): Record<string, number> | null {
+  if (!v || typeof v !== "object" || Array.isArray(v)) return null;
+  const out: Record<string, number> = {};
+  for (const [k, raw] of Object.entries(v as Record<string, unknown>)) {
+    const n = num(raw);
+    if (n > 0) out[k] = n;
+  }
+  return Object.keys(out).length > 0 ? out : null;
 }
 
 export interface WeighIn {
@@ -141,6 +153,7 @@ function coerceProfile(raw: Record<string, unknown>): Profile {
     target_protein_g: n(raw.target_protein_g),
     target_burn_kcal: n(raw.target_burn_kcal),
     target_active_minutes: n(raw.target_active_minutes),
+    target_micros: coerceMicroAims(raw.target_micros),
   };
 }
 
@@ -263,7 +276,14 @@ export async function loadArena(options: ArenaOptions = {}): Promise<Arena | nul
     // A stated goal outranks the formula: if they have said they want 150 g
     // of protein a day, that is what they should be scored against.
     const theirGoals = (payload.goals ?? []).filter((g) => g.user_id === card.id);
-    const targets = scoreTargetsFrom(base, theirGoals, daysThisMonth);
+    const targets = scoreTargetsFrom(
+      base,
+      theirGoals,
+      daysThisMonth,
+      isMe
+        ? { sex: me.sex, weightKg: me.weight_kg }
+        : { published: card.target_micros },
+    );
 
     const mine = byUser.get(card.id) ?? new Map<string, DailyTotals>();
     const loggedDates = new Set(
