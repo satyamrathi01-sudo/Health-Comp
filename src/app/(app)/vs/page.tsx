@@ -14,15 +14,23 @@ const YOU = "var(--color-lime-glow)";
 const THEM = "var(--color-flame)";
 
 
-export default async function VersusPage() {
+export default async function VersusPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ vs?: string }>;
+}) {
+  const { vs } = await searchParams;
   // foodDays: 1 — this screen compares today and only today, so there is no
   // reason to ship a fortnight of items it will never read. The full
   // fortnight lives one tap away on /vs/[id].
   const arena = await requireArena({ days: 30, foodDays: 1 });
 
   const me = mine(arena);
-  const them = rival(arena);
   const others = rivals(arena);
+  // Whoever the ?vs= chip selected, falling back to the rival currently
+  // ahead. In a challenge with several people this screen used to be stuck
+  // on the leader, which is the one person you can already see is winning.
+  const them = others.find((p) => p.profile.id === vs) ?? rival(arena);
 
   if (!them) {
     return (
@@ -148,6 +156,28 @@ export default async function VersusPage() {
         </Section>
       )}
 
+      {others.length > 1 && (
+        <nav className="-mx-1 flex gap-2 overflow-x-auto px-1 pb-1">
+          {others.map((p) => {
+            const active = p.profile.id === them.profile.id;
+            return (
+              <Link
+                key={p.profile.id}
+                href={active ? "/vs" : `/vs?vs=${p.profile.id}`}
+                scroll={false}
+                aria-current={active ? "true" : undefined}
+                className={`flex shrink-0 items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-semibold ${
+                  active ? "bg-lime-glow text-ink-900" : "surface text-mist-200"
+                }`}
+              >
+                <span aria-hidden="true">{p.profile.avatar_emoji}</span>
+                {p.profile.display_name.split(" ")[0]}
+              </Link>
+            );
+          })}
+        </nav>
+      )}
+
       {/* ---------- the point of the whole screen ---------- */}
       <Section
         title={`Protein · you vs ${firstName}`}
@@ -184,6 +214,7 @@ export default async function VersusPage() {
                 theirs={them.scores.get(day)!}
                 isToday={day === arena.today}
                 first={i === 0}
+                rivalId={them.profile.id}
               />
             ))}
           </div>

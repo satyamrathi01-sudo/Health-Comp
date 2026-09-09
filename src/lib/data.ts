@@ -10,7 +10,7 @@ import { dayOutcome, scoreDay, streakEndingAt, type DayScore, type ScoreTargets 
 import { computeRecovery, type Recovery } from "./recovery.ts";
 import {
   emptyDailyTotals, MICRO_KEYS, toPlayerCard,
-  type Challenge, type ChallengeSummary, type DailyTotals, type FoodItemRow,
+  type Challenge, type ChallengeSummary, type DailyTotals, type DayDetail, type FoodItemRow,
   type FoodLog, type MonthlyGoal, type PlayerCard, type Profile, type SleepQuality,
   type WorkoutLog,
 } from "./types.ts";
@@ -436,4 +436,65 @@ export async function requireArena(options: ArenaOptions = {}): Promise<Arena> {
   if (!arena) redirect("/login");
   if (!arena.me.onboarded) redirect("/onboarding");
   return arena;
+}
+
+/**
+ * The per-item evidence behind one day of one head-to-head.
+ *
+ * A second round trip, which the rest of the app goes out of its way to
+ * avoid — see the note on loadArena. It is deliberate here: this is a page
+ * somebody opened on purpose to see one day in detail, not a tab switch,
+ * and folding two people's per-item rows into the payload every screen
+ * already loads would make every navigation pay for a page most of them
+ * never visit.
+ *
+ * Null rather than throwing when the schema is behind: the drill-down is an
+ * enhancement, and a day that cannot show its evidence should say so rather
+ * than take the page down with it.
+ */
+export async function loadDayDetail(otherId: string, day: string): Promise<DayDetail | null> {
+  if (!supabaseConfigured()) return null;
+
+  const supabase = await createClient();
+  const { data, error } = await supabase.rpc("get_day_detail", {
+    other_id: otherId,
+    day,
+  });
+
+  if (error) {
+    console.warn("loadDayDetail: get_day_detail failed —", error.message);
+    return null;
+  }
+
+  const payload = data as Record<string, unknown> | null;
+  if (!payload) return null;
+
+  const foods = Array.isArray(payload.foods) ? payload.foods : [];
+  const workouts = Array.isArray(payload.workouts) ? payload.workouts : [];
+
+  return {
+    day: String(payload.day ?? day),
+    foods: foods.map((r) => {
+      const o = r as Record<string, unknown>;
+      return {
+        user_id: String(o.user_id),
+        name: String(o.name ?? "").trim(),
+        kcal: num(o.kcal),
+        protein_g: num(o.protein_g),
+        carbs_g: num(o.carbs_g),
+        fat_g: num(o.fat_g),
+        fiber_g: num(o.fiber_g),
+      };
+    }),
+    workouts: workouts.map((r) => {
+      const o = r as Record<string, unknown>;
+      return {
+        user_id: String(o.user_id),
+        name: String(o.name ?? "").trim(),
+        kind: String(o.kind ?? "other"),
+        minutes: num(o.minutes),
+        kcal: num(o.kcal),
+      };
+    }),
+  };
 }

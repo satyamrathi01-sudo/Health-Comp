@@ -227,3 +227,11 @@ select.field {
 @media (prefers-reduced-motion: reduce) {
   .day-versus > summary .chev { transition: none; }
 }
+
+/* A metric line that opens onto its evidence. Kept subtle: the row is
+   already dense, and an underline on every line would be noise. */
+.drill { transition: background 120ms ease; border-radius: 8px; }
+.drill:hover { background: rgba(255, 255, 255, 0.03); }
+
+/* Landing on #burn should not tuck the heading under the top of the view. */
+.anchor-target { scroll-margin-top: 1.25rem; }

@@ -1415,3 +1415,101 @@ grant select on public.player_cards to authenticated;
 -- SQL can do as well as calc.ts, and a wrong aim scores worse than a missing
 -- one: scoreTargetsFrom() falls back to aims scaled by the calorie target
 -- alone until each person's next page load republishes the real figures.
+
+-- ---------------------------------------------------------------------
+-- get_day_detail — the evidence behind one day of one head-to-head.
+--
+-- Every scored line on the day-by-day list can now be opened to see what
+-- actually produced it: which exercises made up the burn, which plates made
+-- up the protein, the carbs, the fat and the fibre. The score already says
+-- who won a line; this says what did it.
+--
+-- Deliberately NOT folded into get_arena. That payload is loaded on every
+-- tab switch and is kept lean for exactly that reason, whereas this is one
+-- day, opened on purpose, and carries per-item rows for two people. Paying
+-- for it only when someone asks is the right trade; the drill-down page
+-- makes this one extra call and nothing else does.
+--
+-- security invoker, so the _mates_read policies on food_logs and
+-- workout_logs are what decide visibility — the same can_see() rule as
+-- everywhere else. The explicit can_see check below is a fast exit, not the
+-- gate: strip it out and RLS still returns nothing for a stranger.
+-- ---------------------------------------------------------------------
+create or replace function public.get_day_detail(other_id uuid, day date)
+returns jsonb
+language plpgsql
+stable
+security invoker
+set search_path = public
+as $$
+declare
+  uid uuid := auth.uid();
+  who uuid[];
+begin
+  if uid is null then
+    return null;
+  end if;
+  if other_id is null or not public.can_see(other_id) then
+    return null;
+  end if;
+
+  who := array[uid, other_id];
+
+  return jsonb_build_object(
+    'day', day,
+    -- One row per distinct food per person: the same fold the protein
+    -- comparison already does, but carrying every macro rather than
+    -- protein alone, so carbs, fat and fibre get the same treatment.
+    'foods', coalesce(
+      (select jsonb_agg(jsonb_build_object(
+                'user_id',   x.user_id,
+                'name',      x.name,
+                'kcal',      x.kcal,
+                'protein_g', x.protein_g,
+                'carbs_g',   x.carbs_g,
+                'fat_g',     x.fat_g,
+                'fiber_g',   x.fiber_g))
+         from (
+           select f.user_id,
+                  min(btrim(it ->> 'name'))                    as name,
+                  round(sum(public.jnum(it, 'kcal')))          as kcal,
+                  round(sum(public.jnum(it, 'protein_g')), 1)  as protein_g,
+                  round(sum(public.jnum(it, 'carbs_g')), 1)    as carbs_g,
+                  round(sum(public.jnum(it, 'fat_g')), 1)      as fat_g,
+                  round(sum(public.jnum(it, 'fiber_g')), 1)    as fiber_g
+             from public.food_logs f
+             cross join lateral jsonb_array_elements(f.items) as it
+            where f.user_id = any(who)
+              and f.local_date = day
+              and btrim(coalesce(it ->> 'name', '')) <> ''
+            group by f.user_id, lower(btrim(it ->> 'name'))
+         ) x), '[]'::jsonb),
+
+    -- The same, for training. kcal here is computed in calc.ts from MET,
+    -- minutes and bodyweight at log time and stored on the exercise, so
+    -- summing it needs no body and leaks none.
+    'workouts', coalesce(
+      (select jsonb_agg(jsonb_build_object(
+                'user_id', y.user_id,
+                'name',    y.name,
+                'kind',    y.kind,
+                'minutes', y.minutes,
+                'kcal',    y.kcal))
+         from (
+           select w.user_id,
+                  min(btrim(ex ->> 'name'))                as name,
+                  min(coalesce(ex ->> 'kind', 'other'))    as kind,
+                  round(sum(public.jnum(ex, 'minutes')), 1) as minutes,
+                  round(sum(public.jnum(ex, 'kcal')))       as kcal
+             from public.workout_logs w
+             cross join lateral jsonb_array_elements(w.exercises) as ex
+            where w.user_id = any(who)
+              and w.local_date = day
+              and btrim(coalesce(ex ->> 'name', '')) <> ''
+            group by w.user_id, lower(btrim(ex ->> 'name'))
+         ) y), '[]'::jsonb)
+  );
+end;
+$$;
+
+grant execute on function public.get_day_detail(uuid, date) to authenticated;

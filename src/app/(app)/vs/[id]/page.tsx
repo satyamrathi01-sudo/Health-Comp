@@ -13,11 +13,11 @@ export const dynamic = "force-dynamic";
 const YOU = "var(--color-lime-glow)";
 const THEM = "var(--color-flame)";
 
-const FOOD_WINDOW = 14;
 
 export default async function OneOnOnePage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const arena = await requireArena({ days: 30, foodDays: FOOD_WINDOW });
+  // Only today needs item rows now; the rest of the page is scores.
+  const arena = await requireArena({ days: 30, foodDays: 1 });
 
   const me = mine(arena);
   // RLS decides who is even loadable, so an unreachable rival is a genuine 404
@@ -60,19 +60,14 @@ export default async function OneOnOnePage({ params }: { params: Promise<{ id: s
     theirName: firstName,
   };
 
-  // Both scopes here, because they answer different questions: today is what
-  // you can still act on, the fortnight is where the pattern lives. Today is
-  // shown even when it is empty — a day that has not started yet is a fact,
-  // and hiding the card would leave the fortnight looking like today.
+  // Today only. A rolling fortnight total was the last place in the app where
+  // a number covered a span rather than a day, and it consistently read as a
+  // live standing when it was not one. Every comparison here is now one day,
+  // and the day-by-day list below is how a span gets looked at.
   const todayProtein = compareProtein({
     ...proteinArgs,
     mineItems: itemsFor(arena, arena.me.id, arena.today),
     theirItems: itemsFor(arena, them.profile.id, arena.today),
-  });
-  const windowProtein = compareProtein({
-    ...proteinArgs,
-    mineItems: itemsFor(arena, arena.me.id),
-    theirItems: itemsFor(arena, them.profile.id),
   });
 
   return (
@@ -112,14 +107,6 @@ export default async function OneOnOnePage({ params }: { params: Promise<{ id: s
         <ProteinVersus comparison={todayProtein} theirName={firstName} scope="Today" />
       </Section>
 
-      <Section title="The pattern">
-        <ProteinVersus
-          comparison={windowProtein}
-          theirName={firstName}
-          scope={`Last ${FOOD_WINDOW} days`}
-        />
-      </Section>
-
       {/* ---------- today, explained ---------- */}
       <Section title="Today, line by line">
         <ScoreGap mine={todayMine} theirs={todayTheirs} theirName={firstName} />
@@ -142,6 +129,7 @@ export default async function OneOnOnePage({ params }: { params: Promise<{ id: s
                 theirs={f.b}
                 isToday={f.day === arena.today}
                 first={i === 0}
+                rivalId={them.profile.id}
               />
             ))}
           </div>

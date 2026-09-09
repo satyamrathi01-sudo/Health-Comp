@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { compareScores, type DayScore, type ScoreLine } from "@/lib/scoring";
 import GapLineRow from "./GapLine";
 
@@ -14,6 +15,17 @@ const ORDER: ScoreLine["key"][] = [
   "burn", "minutes", "protein", "net", "fibre", "limits", "micros", "logging", "streak",
 ];
 const RANK = new Map(ORDER.map((k, i) => [k, i]));
+
+/**
+ * The lines with per-item evidence behind them.
+ *
+ * Logging and the streak bonus are left out on purpose: they reward an event
+ * rather than an amount, so there is nothing to break down. A link that
+ * opened onto "you logged, they logged" would be a dead end.
+ */
+const DRILLABLE = new Set<ScoreLine["key"]>([
+  "burn", "minutes", "protein", "net", "fibre", "limits", "micros",
+]);
 
 function label(day: string, isToday: boolean): string {
   if (isToday) return "Today";
@@ -42,12 +54,15 @@ export default function DayVersus({
   theirs,
   isToday,
   first,
+  rivalId,
 }: {
   day: string;
   mine: DayScore;
   theirs: DayScore;
   isToday: boolean;
   first: boolean;
+  /** Given, every drillable line links to that day's evidence. */
+  rivalId?: string;
 }) {
   const played = mine.logged || theirs.logged;
   const edge = first ? "" : "hair";
@@ -109,9 +124,19 @@ export default function DayVersus({
       </summary>
 
       <div className="pb-1 pl-[5.5rem] pr-1">
-        {lines.map((line) => (
-          <GapLineRow key={line.key} line={line} dense />
-        ))}
+        {lines.map((line) =>
+          rivalId && DRILLABLE.has(line.key) ? (
+            <Link
+              key={line.key}
+              href={`/vs/${rivalId}/${day}#${line.key}`}
+              className="drill block"
+            >
+              <GapLineRow line={line} dense />
+            </Link>
+          ) : (
+            <GapLineRow key={line.key} line={line} dense />
+          ),
+        )}
       </div>
     </details>
   );

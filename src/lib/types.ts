@@ -93,6 +93,33 @@ export function toPlayerCard(p: Profile | PlayerCard): PlayerCard {
  * One food, on one day, for one person — summed across every meal it
  * appeared in. The unit the Versus protein breakdown reasons over.
  */
+/** One food on one day for one person, with every macro it carried. */
+export interface DayDetailFood {
+  user_id: string;
+  name: string;
+  kcal: number;
+  protein_g: number;
+  carbs_g: number;
+  fat_g: number;
+  fiber_g: number;
+}
+
+/** One exercise on one day for one person. */
+export interface DayDetailWorkout {
+  user_id: string;
+  name: string;
+  kind: string;
+  minutes: number;
+  kcal: number;
+}
+
+/** The evidence behind a single day of a head-to-head. */
+export interface DayDetail {
+  day: string;
+  foods: DayDetailFood[];
+  workouts: DayDetailWorkout[];
+}
+
 export interface FoodItemRow {
   user_id: string;
   date: string;
