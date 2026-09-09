@@ -1,4 +1,4 @@
-import type { DailyTotals } from "./types";
+import type { DailyTotals } from "./types.ts";
 
 /* =====================================================================
  * SCORING — every knob lives in this file. Change a number here and the
@@ -18,9 +18,9 @@ import type { DailyTotals } from "./types";
  *     Absolute numbers. Kept because a half-filled profile should still
  *     produce a score rather than nothing.
  *
- * Active minutes and the logging and streak bonuses stay absolute in both
- * modes: an hour is an hour regardless of bodyweight, and showing up is
- * showing up.
+ * Only the logging and streak points stay absolute, and they are not targets
+ * at all — they reward an event. There is nothing about a body that could
+ * scale "did you log today"; every actual target here is that person's own.
  * ===================================================================== */
 
 export const SCORING = {
@@ -71,6 +71,12 @@ export interface ScoreTargets {
   burnTarget: number;
   proteinTarget: number;
   kcalTarget: number;
+  /**
+   * How long this person's own burn target takes at a moderate effort.
+   * Optional: a card published before this existed has none, and that line
+   * falls back to absolute scoring rather than to zero.
+   */
+  minutesTarget?: number;
 }
 
 export interface ScoreLine {
@@ -135,12 +141,15 @@ export function scoreDay(
     ? round1(Math.min(1, proteinG / rel.proteinTarget) * SCORING.protein.max)
     : capped(proteinG, SCORING.protein.gramsPerPoint, SCORING.protein.max);
 
-  /* ---------------- active minutes (absolute in both modes) ---------------- */
-  const minutes = capped(
-    activeMinutes,
-    SCORING.activeMinutes.minutesPerPoint,
-    SCORING.activeMinutes.max,
-  );
+  /* ---------------- active minutes ---------------- */
+  // Judged against how long YOUR burn target takes at a moderate effort, so
+  // an active person chasing 600 kcal is asked for more minutes than a
+  // sedentary one chasing 250. Falls back to the flat hour when no target has
+  // been published — an older card, or a half-filled profile.
+  const minutesTarget = rel?.minutesTarget ?? 0;
+  const minutes = minutesTarget > 0
+    ? round1(Math.min(1, activeMinutes / minutesTarget) * SCORING.activeMinutes.max)
+    : capped(activeMinutes, SCORING.activeMinutes.minutesPerPoint, SCORING.activeMinutes.max);
 
   /* ---------------- calories ---------------- */
   // Guard: without a food log this would hand out full marks for logging
@@ -197,7 +206,9 @@ export function scoreDay(
     {
       key: "minutes",
       label: "Active minutes",
-      detail: `${Math.round(activeMinutes)} min`,
+      detail: minutesTarget > 0
+        ? `${Math.round(activeMinutes)} / ${minutesTarget} min`
+        : `${Math.round(activeMinutes)} min`,
       points: minutes,
       max: SCORING.activeMinutes.max,
     },
@@ -325,8 +336,12 @@ function closeHint(
       const eggs = Math.max(1, Math.round(grams / 18));
       return `${grams} g more protein — roughly ${eggs} eggs, or ${eggs * 100} g of paneer`;
     }
-    case "minutes":
-      return `${Math.round(p * SCORING.activeMinutes.minutesPerPoint)} more active minutes`;
+    case "minutes": {
+      const perPoint = targets?.minutesTarget
+        ? targets.minutesTarget / SCORING.activeMinutes.max
+        : SCORING.activeMinutes.minutesPerPoint;
+      return `${Math.round(p * perPoint)} more active minutes`;
+    }
     case "net":
       return targets
         ? `land closer to your ${targets.kcalTarget} kcal target`
@@ -387,7 +402,7 @@ export function compareScores(mine: DayScore, theirs: DayScore): ScoreGap {
  * ===================================================================== */
 
 export type ImpactComponent =
-  | "burn" | "protein" | "calories" | "minutes" | "logging" | "sleep" | "micros" | "none";
+  | "burn" | "protein" | "calories" | "minutes" | "logging" | "sleep" | "water" | "micros" | "none";
 
 export interface Impact {
   component: ImpactComponent;
@@ -423,9 +438,9 @@ function withImpact(t: DailyTotals | null, impact: Impact): DailyTotals {
       return { ...base, kcal_in: Math.max(0, base.kcal_in + amount), meals: Math.max(1, base.meals) };
     case "logging":
       return { ...base, meals: Math.max(1, base.meals), sessions: Math.max(1, base.sessions) };
-    // Sleep and micronutrients are tracked but not scored, so they are worth
-    // zero points by construction — and saying so is more honest than
-    // inventing a number.
+    // Sleep, water and micronutrients are tracked but not scored, so they
+    // are worth zero points by construction — and saying so is more honest
+    // than inventing a number.
     default:
       return base;
   }
@@ -437,7 +452,12 @@ export function projectedGain(
   streakDays: number,
   targets: ScoreTargets | null,
 ): number {
-  if (impact.component === "sleep" || impact.component === "micros" || impact.component === "none") {
+  if (
+    impact.component === "sleep" ||
+    impact.component === "water" ||
+    impact.component === "micros" ||
+    impact.component === "none"
+  ) {
     return 0;
   }
   const before = scoreDay(readable(totals), "projection", streakDays, targets);

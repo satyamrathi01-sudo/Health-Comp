@@ -3,12 +3,16 @@
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { createClient } from "@/lib/supabase/client";
+import { publishedTargets } from "@/lib/calc";
+import type { Profile } from "@/lib/types";
 
 export default function WeighIn({
-  userId, today, current, delta,
+  userId, today, profile, current, delta,
 }: {
   userId: string;
   today: string;
+  /** Needed to republish the targets that move with bodyweight. */
+  profile: Profile;
   current: number;
   delta: number | null;
 }) {
@@ -25,7 +29,16 @@ export default function WeighIn({
 
     // The weigh-in drives the chart; profile.weight_kg prices future workouts.
     await supabase.from("weigh_ins").upsert({ user_id: userId, local_date: today, weight_kg: weight });
-    await supabase.from("profiles").update({ weight_kg: weight }).eq("id", userId);
+
+    // Protein scales per kg and BMR moves with weight, so the published
+    // targets move too. Recomputed here rather than left to drift: a rival
+    // scores my days from those three numbers, and the next page load would
+    // otherwise be scoring me against yesterday's body.
+    const next: Profile = { ...profile, weight_kg: weight };
+    await supabase
+      .from("profiles")
+      .update({ weight_kg: weight, ...publishedTargets(next, today) })
+      .eq("id", userId);
 
     setBusy(false);
     setSaved(true);
@@ -56,6 +69,10 @@ export default function WeighIn({
           since your first logged weigh-in
         </p>
       )}
+
+      <p className="mt-3 text-[0.62rem] leading-relaxed text-mist-600">
+        Weigh-ins are yours alone — nobody you are competing against can read them.
+      </p>
     </div>
   );
 }

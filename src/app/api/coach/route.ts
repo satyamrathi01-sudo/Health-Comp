@@ -2,9 +2,15 @@ import { createHash } from "crypto";
 import { NextResponse } from "next/server";
 import { createClient, supabaseConfigured } from "@/lib/supabase/server";
 import { generateAdvice, GeminiError } from "@/lib/gemini";
-import { applyGoalsToTargets, daysInMonthOf, deriveTargets, MICRO_REFS, microTarget } from "@/lib/calc";
+import {
+  addDays, applyGoalsToTargets, daysInMonthOf, deriveTargets, localDate, localHour,
+  MICRO_REFS, microTarget, prettyDate, type WeightPlan,
+} from "@/lib/calc";
+import { breachedLimits } from "@/lib/limits";
+import { hydration, litres, waterCeilingMl, waterTarget } from "@/lib/hydration";
 import { projectedGain, scoreDay, type ScoreTargets } from "@/lib/scoring";
 import { computeRecovery } from "@/lib/recovery";
+import { getMyProfile } from "@/lib/data";
 import type { AdvicePoint, DailyTotals, MonthlyGoal, Profile } from "@/lib/types";
 
 export const runtime = "nodejs";
@@ -16,6 +22,10 @@ function briefing(
   week: DailyTotals[],
   goals: MonthlyGoal[],
   targets: ScoreTargets | null,
+  plan: WeightPlan | null,
+  breaches: ReturnType<typeof breachedLimits>,
+  water: ReturnType<typeof hydration> | null,
+  macros: ReturnType<typeof deriveTargets>,
 ): string {
   const n = (v: number | null | undefined) => Math.round(Number(v ?? 0));
 
@@ -25,6 +35,12 @@ function briefing(
       ? `Daily targets they are scored against: ${targets.kcalTarget} kcal intake, ` +
         `${targets.proteinTarget} g protein, ${targets.burnTarget} kcal burned.`
       : "Targets: not enough profile data.",
+    macros
+      ? `Their macro split, worked out from that calorie target and their goal: ` +
+        `${macros.proteinTarget} g protein, ${macros.carbsTarget} g carbs, ` +
+        `${macros.fatTarget} g fat, ${macros.fiberTarget} g fibre. Every number below ` +
+        `is set for THIS person — do not fall back on generic advice.`
+      : "",
     "",
     "TODAY",
     `  Eaten ${n(today?.kcal_in)} kcal across ${n(today?.meals)} meals.`,
@@ -37,13 +53,39 @@ function briefing(
     today?.sleep_hours != null
       ? `  Sleep ${today.sleep_hours} h${today.sleep_quality ? ` (${today.sleep_quality})` : ""}.`
       : "  Sleep not logged.",
+    water
+      ? `  Water ${litres(water.drankMl)} of a ${litres(water.targetMl)} aim — ${water.headline.toLowerCase()}.`
+      : "  Water not tracked today.",
     "",
     "MICRONUTRIENTS TODAY (value vs target)",
   ];
 
+  if (plan) {
+    lines.splice(2, 0,
+      `They are working to reach ${plan.targetKg} kg by ${prettyDate(plan.targetDate)} — ` +
+      `${plan.kgToGo} kg to go at ${plan.kgPerWeek} kg a week, which is what the calorie ` +
+      `target above is set for. Advice that ignores this plan is not useful to them.`);
+  }
+
+  if (breaches.length) {
+    lines.push(
+      "",
+      "ALREADY PAST A LIMIT TODAY — address the worst of these first:",
+      ...breaches.map((b) =>
+        `  ${b.label}: ${b.value} of ${b.limit} ${b.unit}` +
+        (b.state === "over" ? ` — OVER by ${b.over}` : " — nearly at the limit")),
+    );
+  }
+
+  const microCtx = {
+    kcalTarget: targets?.kcalTarget ?? 2000,
+    weightKg: profile.weight_kg,
+    exerciseKcal: Number(today?.kcal_out ?? 0),
+  };
+
   for (const ref of MICRO_REFS) {
     const value = Number(today?.[ref.key] ?? 0);
-    const target = microTarget(ref, profile.sex);
+    const target = microTarget(ref, profile.sex, microCtx);
     const verdict =
       ref.mode === "limit"
         ? value > target ? "OVER LIMIT" : "within limit"
@@ -77,7 +119,7 @@ function briefing(
     lines.push("", "They have set no goals this month.");
   }
 
-  return lines.join("\n");
+  return lines.filter((l, i) => l !== "" || lines[i - 1] !== "").join("\n");
 }
 
 export async function POST(request: Request) {
@@ -97,40 +139,40 @@ export async function POST(request: Request) {
   }
 
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return NextResponse.json({ error: "Not signed in." }, { status: 401 });
 
-  const { data: profileRow } = await supabase
-    .from("profiles").select("*").eq("id", user.id).single();
-  if (!profileRow) return NextResponse.json({ error: "No profile." }, { status: 400 });
-  const profile = profileRow as Profile;
+  // Through getMyProfile so the numerics are coerced exactly as they are for
+  // the pages: PostgREST hands back "72.5" as a string, and a target derived
+  // from strings is a target that quietly disagrees with the scoreboard. It
+  // also reads auth.uid() from the JWT, so no separate "who am I" call is
+  // needed before it.
+  const profile: Profile | null = await getMyProfile();
+  if (!profile) return NextResponse.json({ error: "Not signed in." }, { status: 401 });
 
-  const today = new Intl.DateTimeFormat("en-CA", {
-    timeZone: profile.timezone, year: "numeric", month: "2-digit", day: "2-digit",
-  }).format(new Date());
+  const today = localDate(profile.timezone);
+  const fromDate = addDays(today, -6);
+  const monthStart = today.slice(0, 8) + "01";
 
-  const from = new Date(today + "T00:00:00Z");
-  from.setUTCDate(from.getUTCDate() - 6);
-  const fromDate = from.toISOString().slice(0, 10);
-
-  const { data: rows } = await supabase
-    .from("daily_totals").select("*")
-    .eq("user_id", user.id).gte("local_date", fromDate).lte("local_date", today);
+  // Three independent reads. They only need the timezone from the profile, so
+  // they go together rather than one after another — on a function talking to
+  // Supabase across a region, sequencing these was most of the wait.
+  const [{ data: rows }, { data: goalRows }, { data: existing }] = await Promise.all([
+    supabase.from("daily_totals").select("*")
+      .eq("user_id", profile.id).gte("local_date", fromDate).lte("local_date", today),
+    supabase.from("monthly_goals").select("*")
+      .eq("user_id", profile.id).eq("month", monthStart),
+    supabase.from("daily_advice").select("*")
+      .eq("user_id", profile.id).eq("local_date", today).maybeSingle(),
+  ]);
 
   const week = (rows ?? []) as DailyTotals[];
   const todayTotals = week.find((d) => d.local_date === today) ?? null;
-
-  const monthStart = today.slice(0, 8) + "01";
-  const { data: goalRows } = await supabase
-    .from("monthly_goals").select("*")
-    .eq("user_id", user.id).eq("month", monthStart);
   const goals = (goalRows ?? []) as MonthlyGoal[];
 
   // Goals override the derived targets where they overlap, so the coach and
   // the score are working from the same numbers.
-  const derived = deriveTargets(profile);
+  const derived = deriveTargets(profile, today);
   const adjusted = derived
-    ? applyGoalsToTargets(derived, goals, profile.weight_kg, daysInMonthOf(today))
+    ? applyGoalsToTargets(derived, goals, daysInMonthOf(today))
     : null;
   const targets: ScoreTargets | null = adjusted
     ? {
@@ -149,18 +191,11 @@ export async function POST(request: Request) {
 
   // Readiness changes what good advice looks like: telling someone to go
   // hard on four hours of sleep is bad coaching.
-  const yesterdayDate = (() => {
-    const d = new Date(today + "T00:00:00Z");
-    d.setUTCDate(d.getUTCDate() - 1);
-    return d.toISOString().slice(0, 10);
-  })();
-  const yesterday = week.find((d) => d.local_date === yesterdayDate) ?? null;
+  const yesterday = week.find((d) => d.local_date === addDays(today, -1)) ?? null;
 
   let consecutiveTrainingDays = 0;
   for (let i = 1; i < 8; i++) {
-    const d = new Date(today + "T00:00:00Z");
-    d.setUTCDate(d.getUTCDate() - i);
-    const row = week.find((w) => w.local_date === d.toISOString().slice(0, 10));
+    const row = week.find((w) => w.local_date === addDays(today, -i));
     if (!row || row.sessions === 0) break;
     consecutiveTrainingDays++;
   }
@@ -176,8 +211,29 @@ export async function POST(request: Request) {
     targets,
   });
 
+  const water = hydration(
+    todayTotals?.water_ml ?? 0,
+    waterTarget(profile, todayTotals),
+    localHour(profile.timezone),
+  );
+
+  const breaches = breachedLimits(
+    todayTotals,
+    profile.sex,
+    adjusted
+      ? {
+          ...adjusted,
+          weightKg: profile.weight_kg,
+          waterCeilingMl: waterCeilingMl(waterTarget(profile, todayTotals)),
+        }
+      : null,
+  );
+
   const text =
-    briefing(profile, todayTotals, week, goals, targets) +
+    briefing(
+      profile, todayTotals, week, goals, targets,
+      adjusted?.plan ?? null, breaches, water, adjusted,
+    ) +
     (recovery.score === null
       ? "\n\nRECOVERY: unknown, no sleep logged."
       : `\n\nRECOVERY: ${recovery.score}/100 (${recovery.band}) — ${recovery.headline}.\n` +
@@ -188,10 +244,6 @@ export async function POST(request: Request) {
   // Regenerate only when the day's numbers actually moved. Without this the
   // coach would burn a Gemini call on every dashboard render.
   const basisHash = createHash("sha256").update(text).digest("hex").slice(0, 32);
-
-  const { data: existing } = await supabase
-    .from("daily_advice").select("*")
-    .eq("user_id", user.id).eq("local_date", today).maybeSingle();
 
   const unchanged = existing && existing.basis_hash === basisHash;
   if (existing && (unchanged || !force)) {
@@ -224,7 +276,7 @@ export async function POST(request: Request) {
     advice.points = priced;
 
     await supabase.from("daily_advice").upsert({
-      user_id: user.id,
+      user_id: profile.id,
       local_date: today,
       basis_hash: basisHash,
       headline: advice.headline,

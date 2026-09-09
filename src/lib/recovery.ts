@@ -1,5 +1,5 @@
-import type { SleepQuality } from "./types";
-import type { ScoreTargets } from "./scoring";
+import type { SleepQuality } from "./types.ts";
+import type { ScoreTargets } from "./scoring.ts";
 
 /* =====================================================================
  * Recovery — how ready you are to train hard today.

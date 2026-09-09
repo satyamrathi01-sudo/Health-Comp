@@ -136,6 +136,8 @@ export default function AdviceCard({ hasData }: { hasData: boolean }) {
                     </>
                   ) : p.component === "sleep" ? (
                     "Not scored — but it drives recovery and tomorrow's training"
+                  ) : p.component === "water" ? (
+                    "Not scored — but it drives how the training actually feels"
                   ) : p.component === "micros" ? (
                     "Not scored — long-term health, not points"
                   ) : (

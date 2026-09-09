@@ -1,19 +1,35 @@
 import "server-only";
+import { after } from "next/server";
 import { redirect } from "next/navigation";
-import { createClient, supabaseConfigured } from "./supabase/server";
-import { addDays, applyGoalsToTargets, dateRange, daysInMonthOf, deriveTargets, localDate } from "./calc";
-import { dayOutcome, scoreDay, streakEndingAt, type DayScore } from "./scoring";
-import { computeRecovery, type Recovery } from "./recovery";
-import { emptyDailyTotals, MICRO_KEYS, type Challenge, type ChallengeSummary, type DailyTotals, type FoodLog, type MonthlyGoal, type Profile, type SleepQuality, type WorkoutLog } from "./types";
+import { createClient, supabaseConfigured } from "./supabase/server.ts";
+import {
+  addDays, cardTargets, dateRange, daysInMonthOf, deriveTargets,
+  publishedTargets, publishedTargetsMatch, scoreTargetsFrom, type DerivedTargets,
+} from "./calc.ts";
+import { dayOutcome, scoreDay, streakEndingAt, type DayScore, type ScoreTargets } from "./scoring.ts";
+import { computeRecovery, type Recovery } from "./recovery.ts";
+import {
+  emptyDailyTotals, MICRO_KEYS, toPlayerCard,
+  type Challenge, type ChallengeSummary, type DailyTotals, type FoodItemRow,
+  type FoodLog, type MonthlyGoal, type PlayerCard, type Profile, type SleepQuality,
+  type WorkoutLog,
+} from "./types.ts";
 
 export interface PlayerView {
-  profile: Profile;
+  /**
+   * Name, emoji and published targets. Deliberately NOT a Profile: a rival's
+   * height, weight, age and sex never leave the database, so there is nothing
+   * here to leak. Your own full profile is on `Arena.me`.
+   */
+  profile: PlayerCard;
   isMe: boolean;
   /** Readiness to train today. Estimated, not measured — see recovery.ts. */
   recovery: Recovery;
   /** date -> score, for every day in the requested window */
   scores: Map<string, DayScore>;
   totals: Map<string, DailyTotals>;
+  /** The targets every day here was scored against. */
+  targets: ScoreTargets | null;
   streak: number;
   /** days won across the window (only counting days somebody logged) */
   wins: number;
@@ -24,6 +40,8 @@ export interface PlayerView {
 
 export interface Arena {
   me: Profile;
+  /** My own targets, in full — including the parts nobody else may see. */
+  myTargets: DerivedTargets | null;
   challenge: Challenge | null;
   players: PlayerView[];
   days: string[];
@@ -33,6 +51,10 @@ export interface Arena {
   /** My own entries for today, so the dashboard needs no follow-up query. */
   todayFood: FoodLog[];
   todayWorkouts: WorkoutLog[];
+  /** Per-food protein rollups, when the page asked for them. */
+  foodItems: FoodItemRow[];
+  /** My own weigh-ins, newest first. Nobody else's are readable. */
+  myWeighIns: WeighIn[];
   /** Every challenge I belong to, for the switcher. */
   myChallenges: ChallengeSummary[];
 }
@@ -59,11 +81,68 @@ function coerceTotals(r: Record<string, unknown>): DailyTotals {
     is_rest_day: Boolean(r.is_rest_day),
     sleep_hours: r.sleep_hours === null || r.sleep_hours === undefined ? null : num(r.sleep_hours),
     sleep_quality: (r.sleep_quality as SleepQuality) ?? null,
-    ...Object.fromEntries(MICRO_KEYS.map((k) => [k, num(r[k])])) as Record<keyof typeof EMPTY, number>,
+    water_ml: num(r.water_ml),
+    ...Object.fromEntries(MICRO_KEYS.map((k) => [k, num(r[k])])) as Record<string, number>,
   } as DailyTotals;
 }
 
-const EMPTY = {} as Record<string, number>;
+function coerceCard(r: Record<string, unknown>): PlayerCard {
+  const int = (v: unknown) => (v === null || v === undefined ? null : Math.round(num(v)));
+  return {
+    id: String(r.id),
+    display_name: String(r.display_name ?? "Player"),
+    avatar_emoji: String(r.avatar_emoji ?? "🔥"),
+    created_at: String(r.created_at ?? ""),
+    target_kcal: int(r.target_kcal),
+    target_protein_g: int(r.target_protein_g),
+    target_burn_kcal: int(r.target_burn_kcal),
+    target_active_minutes: int(r.target_active_minutes),
+  };
+}
+
+export interface WeighIn {
+  local_date: string;
+  weight_kg: number;
+}
+
+function coerceWeighIns(rows: Record<string, unknown>[]): WeighIn[] {
+  return rows.map((r) => ({ local_date: String(r.local_date), weight_kg: num(r.weight_kg) }));
+}
+
+function coerceItems(rows: Record<string, unknown>[]): FoodItemRow[] {
+  return rows.map((r) => ({
+    user_id: String(r.user_id),
+    date: String(r.date),
+    name: String(r.name ?? "").trim(),
+    protein_g: num(r.protein_g),
+    kcal: num(r.kcal),
+  }));
+}
+
+/** Numerics arrive as strings; the profile is full of them. */
+function coerceProfile(raw: Record<string, unknown>): Profile {
+  const n = (v: unknown) => (v === null || v === undefined || v === "" ? null : num(v));
+  return {
+    ...(raw as unknown as Profile),
+    height_cm: n(raw.height_cm),
+    weight_kg: n(raw.weight_kg),
+    bmr_override: n(raw.bmr_override),
+    kcal_target_override: n(raw.kcal_target_override),
+    protein_target_g: n(raw.protein_target_g),
+    carbs_target_g: n(raw.carbs_target_g),
+    fat_target_g: n(raw.fat_target_g),
+    fiber_target_g: n(raw.fiber_target_g),
+    burn_target_override: n(raw.burn_target_override),
+    minutes_target_override: n(raw.minutes_target_override),
+    water_target_ml: n(raw.water_target_ml),
+    weight_goal_kg: n(raw.weight_goal_kg),
+    weight_goal_start_kg: n(raw.weight_goal_start_kg),
+    target_kcal: n(raw.target_kcal),
+    target_protein_g: n(raw.target_protein_g),
+    target_burn_kcal: n(raw.target_burn_kcal),
+    target_active_minutes: n(raw.target_active_minutes),
+  };
+}
 
 export async function getMyProfile(): Promise<Profile | null> {
   if (!supabaseConfigured()) return null;
@@ -73,293 +152,131 @@ export async function getMyProfile(): Promise<Profile | null> {
     // no separate "who am I" call is needed, and RLS still restricts the row.
     const { data, error } = await supabase.rpc("get_my_profile");
     if (error) {
-      if (error.code === "PGRST202" || /get_my_profile/.test(error.message)) {
-        const { data: { user } } = await supabase.auth.getUser();
-        if (!user) return null;
-        const { data: row } = await supabase
-          .from("profiles").select("*").eq("id", user.id).single();
-        return (row as Profile) ?? null;
-      }
       console.error("getMyProfile failed —", error.message);
       return null;
     }
-    return (data as Profile) ?? null;
+    return data ? coerceProfile(data as Record<string, unknown>) : null;
   } catch (err) {
     console.error("getMyProfile threw —", (err as Error).message);
     return null;
   }
 }
 
-/**
- * The pre-v4 path: six sequential round trips. Kept only so a deploy that
- * reaches production before the migration does still works.
- */
-async function loadArenaLegacy(windowDays: number): Promise<ArenaPayload | null> {
-  const supabase = await createClient();
-
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return null;
-
-  const { data: meRow } = await supabase.from("profiles").select("*").eq("id", user.id).single();
-  if (!meRow) return null;
-  const me = meRow as Profile;
-
-  const today = localDate(me.timezone);
-  const fromDate = addDays(today, -(windowDays - 1));
-
-  const { data: memberships } = await supabase
-    .from("challenge_members")
-    .select("challenge_id, challenges(*)")
-    .eq("user_id", me.id)
-    .order("joined_at", { ascending: false })
-    .limit(1);
-
-  const raw = (memberships?.[0] as Record<string, unknown> | undefined)?.challenges;
-  const challenge = (Array.isArray(raw) ? raw[0] : raw) as Challenge | null;
-
-  let players: Profile[] = [me];
-  if (challenge) {
-    const { data: memberRows } = await supabase
-      .from("challenge_members").select("user_id").eq("challenge_id", challenge.id);
-    const ids = (memberRows ?? []).map((r) => String(r.user_id));
-    if (ids.length) {
-      const { data: profileRows } = await supabase.from("profiles").select("*").in("id", ids);
-      const found = (profileRows ?? []) as Profile[];
-      if (found.length) players = found.some((p) => p.id === me.id) ? found : [me, ...found];
-    }
-  }
-
-  const { data: totalRows } = await supabase
-    .from("daily_totals").select("*")
-    .in("user_id", players.map((p) => p.id))
-    .gte("local_date", fromDate).lte("local_date", today);
-
-  const { data: goalRows } = await supabase
-    .from("monthly_goals").select("*")
-    .in("user_id", players.map((p) => p.id))
-    .eq("month", today.slice(0, 8) + "01");
-
-  const allChallenges = await fetchMyChallenges(supabase, me);
-
-  const [{ data: foodRows }, { data: workoutRows }] = await Promise.all([
-    supabase.from("food_logs").select("*")
-      .eq("user_id", me.id).eq("local_date", today).order("logged_at", { ascending: true }),
-    supabase.from("workout_logs").select("*")
-      .eq("user_id", me.id).eq("local_date", today).order("logged_at", { ascending: true }),
-  ]);
-
-  return {
-    today,
-    from_date: fromDate,
-    me,
-    challenge,
-    players,
-    totals: (totalRows ?? []) as Record<string, unknown>[],
-    goals: (goalRows ?? []) as MonthlyGoal[],
-    today_food: (foodRows ?? []) as FoodLog[],
-    today_workouts: (workoutRows ?? []) as WorkoutLog[],
-    my_challenges: allChallenges,
-  };
-}
-
-
-/**
- * Every challenge the caller belongs to, with owner names for the switcher.
- *
- * Used both by the legacy path and as a backfill when get_arena predates v7:
- * that call SUCCEEDS and simply omits the field, so detecting a missing
- * function is not enough — the missing field has to be detected too.
- */
-async function fetchMyChallenges(
-  supabase: Awaited<ReturnType<typeof createClient>>,
-  me: Profile,
-): Promise<ChallengeSummary[]> {
-  // Filter to MY membership rows. Without this, RLS also returns my rivals'
-  // rows in the same challenges, and each one embeds the same challenge —
-  // so a two-person challenge appeared twice and a three-person one thrice.
-  const { data: memberships } = await supabase
-    .from("challenge_members").select("challenge_id, challenges(*)")
-    .eq("user_id", me.id)
-    .order("joined_at", { ascending: false });
-
-  const rows = (memberships ?? [])
-    .map((r) => {
-      const raw = (r as Record<string, unknown>).challenges;
-      return (Array.isArray(raw) ? raw[0] : raw) as Challenge | null;
-    })
-    .filter((c): c is Challenge => Boolean(c));
-
-  if (!rows.length) return [];
-
-  const ownerIds = [...new Set(rows.map((c) => c.created_by))];
-  const [{ data: owners }, { data: counts }] = await Promise.all([
-    supabase.from("profiles").select("id, display_name, avatar_emoji").in("id", ownerIds),
-    supabase.from("challenge_members").select("challenge_id").in("challenge_id", rows.map((c) => c.id)),
-  ]);
-
-  const ownerById = new Map(
-    (owners ?? []).map((o) => [String(o.id), o as { display_name: string; avatar_emoji: string }]),
-  );
-
-  return rows.map((c) => {
-    const owner = ownerById.get(c.created_by);
-    return {
-      id: c.id,
-      name: c.name,
-      invite_code: c.invite_code,
-      start_date: c.start_date,
-      end_date: c.end_date,
-      created_by: c.created_by,
-      is_mine: c.created_by === me.id,
-      owner_name: c.created_by === me.id ? me.display_name : owner?.display_name ?? "Someone",
-      owner_emoji: owner?.avatar_emoji ?? "🔥",
-      member_count: (counts ?? []).filter((m) => m.challenge_id === c.id).length || 1,
-    };
-  });
-}
-
 interface ArenaPayload {
   today: string;
   from_date: string;
-  me: Profile;
+  me: Record<string, unknown>;
   challenge: Challenge | null;
-  players: Profile[];
+  players: Record<string, unknown>[];
   totals: Record<string, unknown>[];
-  goals?: MonthlyGoal[];
-  today_food?: FoodLog[];
-  today_workouts?: WorkoutLog[];
-  my_challenges?: ChallengeSummary[];
+  goals: MonthlyGoal[];
+  today_food: FoodLog[];
+  today_workouts: WorkoutLog[];
+  food_items: Record<string, unknown>[];
+  my_weigh_ins: Record<string, unknown>[];
+  my_challenges: ChallengeSummary[];
+}
+
+export class SchemaOutOfDateError extends Error {
+  constructor() {
+    super(
+      "FitClash's database is behind this build: get_arena(days, challenge_id, food_days) " +
+        "is missing. Paste supabase/schema.sql into the Supabase SQL editor and run it.",
+    );
+    this.name = "SchemaOutOfDateError";
+  }
+}
+
+export interface ArenaOptions {
+  /** Days of history to score. */
+  days?: number;
+  /**
+   * Days of per-food protein data to fetch for everyone visible. Only the
+   * Versus screens need it, and it is the one part of the payload that grows
+   * with how much people log, so every other page asks for none.
+   */
+  foodDays?: number;
 }
 
 /**
- * Everything the dashboard, versus board and history need — in ONE database
- * round trip.
+ * Everything a screen needs — in ONE database round trip.
  *
- * This used to be six sequential queries (whoami, my profile, my challenge,
- * its members, their profiles, the totals). With the Vercel function running
- * in us-east and Supabase elsewhere, every one of those was a cross-region
- * hop and the page took seconds to render.
+ * Scores are derived here rather than stored, so tuning src/lib/scoring.ts
+ * re-scores all history instantly.
  *
- * Scores are still derived here rather than stored, so tuning
- * src/lib/scoring.ts re-scores all history instantly.
+ * There is no longer a query-by-query fallback. It existed so a deploy that
+ * landed before the SQL still worked, but from v8 the schema is what enforces
+ * the privacy line: the old path read `select * from profiles` for every
+ * member, which the database now refuses and which would have handed out
+ * exactly the numbers this release exists to keep private. A loud error
+ * pointing at schema.sql is the better failure.
  */
-export async function loadArena(windowDays = 30): Promise<Arena | null> {
+export async function loadArena(options: ArenaOptions = {}): Promise<Arena | null> {
   if (!supabaseConfigured()) return null;
 
-  let payload: ArenaPayload | null = null;
-  try {
-    const supabase = await createClient();
-    // v7's get_arena takes (days, challenge_id). A database still on v4-v6
-    // only has (days), and PostgREST rejects the call outright rather than
-    // ignoring the extra argument — so try the new signature, then the old
-    // one, and only then give up to the slow path. Without this middle step a
-    // deploy landing before the migration would lose the single-round-trip
-    // win entirely.
-    let { data, error } = await supabase.rpc("get_arena", {
-      days: windowDays,
-      challenge_id: null,
-    });
+  const windowDays = options.days ?? 30;
+  const foodDays = options.foodDays ?? 0;
 
-    if (error && (error.code === "PGRST202" || /get_arena/.test(error.message))) {
-      ({ data, error } = await supabase.rpc("get_arena", { days: windowDays }));
-    }
+  const supabase = await createClient();
+  const { data, error } = await supabase.rpc("get_arena", {
+    days: windowDays,
+    challenge_id: null,
+    food_days: foodDays,
+  });
 
-    if (error) {
-      // PGRST202 = the function is not in the schema cache, i.e. this database
-      // has not had the v4 migration applied yet. Fall back to the original
-      // query-by-query path so a deploy that lands before the SQL does not
-      // take the app down; it is slower, not broken.
-      if (error.code === "PGRST202" || /get_arena/.test(error.message)) {
-        console.warn(
-          "loadArena: get_arena() missing — using the slow multi-query path. " +
-            "Run supabase/schema.sql to restore one-round-trip loading.",
-        );
-        payload = await loadArenaLegacy(windowDays);
-      } else {
-        console.error("loadArena: get_arena failed —", error.message);
-        return null;
-      }
-    } else {
-      payload = data as ArenaPayload | null;
+  if (error) {
+    // PGRST202 = not in the schema cache, i.e. the migration has not been run.
+    if (error.code === "PGRST202" || /get_arena/.test(error.message)) {
+      throw new SchemaOutOfDateError();
     }
-  } catch (err) {
-    console.error("loadArena threw —", (err as Error).message);
+    console.error("loadArena: get_arena failed —", error.message);
     return null;
   }
 
+  const payload = data as ArenaPayload | null;
   if (!payload?.me) return null;
 
-  // A database on v4/v5 has get_arena but not the v6 shape, so the call
-  // succeeds and simply omits today's entries. Detect the missing field
-  // rather than the missing function, or the timeline silently renders empty
-  // on a deploy that lands before the migration.
-  if (payload.my_challenges === undefined) {
-    try {
-      const supabase = await createClient();
-      payload.my_challenges = await fetchMyChallenges(supabase, payload.me);
-    } catch (err) {
-      console.warn("loadArena: could not list challenges —", (err as Error).message);
-    }
-  }
-
-  if (payload.today_food === undefined) {
-    try {
-      const supabase = await createClient();
-      const [{ data: foodRows }, { data: workoutRows }] = await Promise.all([
-        supabase.from("food_logs").select("*")
-          .eq("user_id", payload.me.id).eq("local_date", payload.today)
-          .order("logged_at", { ascending: true }),
-        supabase.from("workout_logs").select("*")
-          .eq("user_id", payload.me.id).eq("local_date", payload.today)
-          .order("logged_at", { ascending: true }),
-      ]);
-      payload.today_food = (foodRows ?? []) as FoodLog[];
-      payload.today_workouts = (workoutRows ?? []) as WorkoutLog[];
-    } catch (err) {
-      console.warn("loadArena: could not backfill today's logs —", (err as Error).message);
-    }
-  }
-
-  const me = payload.me;
+  const me = coerceProfile(payload.me);
   const today = payload.today;
   const days = dateRange(payload.from_date, today);
+  const daysThisMonth = daysInMonthOf(today);
 
-  const profiles = payload.players?.length ? payload.players : [me];
+  const cards = (payload.players ?? []).map(coerceCard);
+  const players: PlayerCard[] = cards.length ? cards : [toPlayerCard(me)];
   const totals = (payload.totals ?? []).map(coerceTotals);
 
+  // My own targets come from my own profile, always freshly derived. A rival's
+  // come from the card they published, because their body is not mine to see.
+  const myTargets = deriveTargets(me, today);
+  keepPublishedTargetsFresh(supabase, me, myTargets ? publishedTargets(me, today) : null);
+
   const byUser = new Map<string, Map<string, DailyTotals>>();
-  profiles.forEach((p) => byUser.set(p.id, new Map()));
+  players.forEach((p) => byUser.set(p.id, new Map()));
   totals.forEach((t) => byUser.get(t.user_id)?.set(t.local_date, t));
 
   // First pass: score every day for every player, each against their OWN
   // targets. This is what makes the head-to-head fair across different
   // bodies — see the mode note in src/lib/scoring.ts.
-  const drafts = profiles.map((profile) => {
+  const drafts = players.map((card) => {
+    const isMe = card.id === me.id;
+    const base = isMe ? myTargets : cardTargets(card);
     // A stated goal outranks the formula: if they have said they want 150 g
     // of protein a day, that is what they should be scored against.
-    const derived = deriveTargets(profile);
-    const theirGoals = (payload!.goals ?? []).filter((g) => g.user_id === profile.id);
-    const adjusted = derived
-      ? applyGoalsToTargets(derived, theirGoals, profile.weight_kg, daysInMonthOf(today))
-      : null;
-    const targets = adjusted
-      ? {
-          burnTarget: adjusted.burnTarget,
-          proteinTarget: adjusted.proteinTarget,
-          kcalTarget: adjusted.kcalTarget,
-        }
-      : null;
-    const mine = byUser.get(profile.id) ?? new Map<string, DailyTotals>();
+    const theirGoals = (payload.goals ?? []).filter((g) => g.user_id === card.id);
+    const targets = scoreTargetsFrom(base, theirGoals, daysThisMonth);
+
+    const mine = byUser.get(card.id) ?? new Map<string, DailyTotals>();
     const loggedDates = new Set(
       [...mine.values()].filter((t) => t.meals > 0 || t.sessions > 0 || t.is_rest_day)
         .map((t) => t.local_date),
     );
     const scores = new Map<string, DayScore>();
     for (const d of days) {
-      const t = mine.get(d) ?? emptyDailyTotals(profile.id, d);
+      const t = mine.get(d) ?? emptyDailyTotals(card.id, d);
       // Streak as of that day, so history shows the bonus actually earned.
       scores.set(d, scoreDay(t, d, streakEndingAt(loggedDates, d), targets));
     }
+
     // Recovery looks backwards: last night's sleep (filed under today) and
     // what yesterday's training and eating did to them.
     const todayTotals = mine.get(today) ?? null;
@@ -384,11 +301,12 @@ export async function loadArena(windowDays = 30): Promise<Arena | null> {
     });
 
     return {
-      profile,
-      isMe: profile.id === me.id,
+      profile: card,
+      isMe,
       recovery,
       scores,
       totals: mine,
+      targets,
       // Today's streak: if today isn't logged yet, show yesterday's run.
       streak: loggedDates.has(today)
         ? streakEndingAt(loggedDates, today)
@@ -397,7 +315,7 @@ export async function loadArena(windowDays = 30): Promise<Arena | null> {
   });
 
   // Second pass: head-to-head record needs every player's scores in hand.
-  const players: PlayerView[] = drafts.map((d) => {
+  const scored: PlayerView[] = drafts.map((d) => {
     let wins = 0, losses = 0, ties = 0, points = 0;
     for (const day of days) {
       const mineScore = d.scores.get(day)!;
@@ -416,26 +334,53 @@ export async function loadArena(windowDays = 30): Promise<Arena | null> {
     return { ...d, wins, losses, ties, points: Math.round(points * 10) / 10 };
   });
 
-  players.sort((a, b) => (b.isMe ? 1 : 0) - (a.isMe ? 1 : 0) || b.points - a.points);
+  scored.sort((a, b) => (b.isMe ? 1 : 0) - (a.isMe ? 1 : 0) || b.points - a.points);
 
   return {
     me,
+    myTargets,
     challenge: payload.challenge ?? null,
-    players,
+    players: scored,
     days,
     today,
     goals: payload.goals ?? [],
     todayFood: payload.today_food ?? [],
     todayWorkouts: payload.today_workouts ?? [],
+    foodItems: coerceItems(payload.food_items ?? []),
+    myWeighIns: coerceWeighIns(payload.my_weigh_ins ?? []),
     myChallenges: payload.my_challenges ?? [],
   };
+}
+
+/**
+ * Keep the published copy of my targets in step with my profile.
+ *
+ * The writers (onboarding, the targets editor, a weigh-in) all publish as
+ * they save, so this normally finds nothing to do and costs one comparison.
+ * It exists because a rival scores my days from these three numbers: if a
+ * write path is ever missed, their scoreboard quietly drifts from mine, and
+ * a self-healing read is a much better answer than a discrepancy nobody can
+ * explain.
+ *
+ * Runs after the response is sent, so it never adds latency.
+ */
+function keepPublishedTargetsFresh(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  me: Profile,
+  fresh: ReturnType<typeof publishedTargets> | null,
+): void {
+  if (!fresh || publishedTargetsMatch(me, fresh)) return;
+  after(async () => {
+    const { error } = await supabase.from("profiles").update(fresh).eq("id", me.id);
+    if (error) console.warn("could not republish targets —", error.message);
+  });
 }
 
 export function rivals(arena: Arena): PlayerView[] {
   return arena.players.filter((p) => !p.isMe);
 }
 
-/** The rival currently ahead — the one worth showing on the dashboard. */
+/** The rival currently ahead — the one worth showing on the versus board. */
 export function rival(arena: Arena): PlayerView | null {
   return rivals(arena).reduce<PlayerView | null>(
     (best, p) => (!best || p.points > best.points ? p : best),
@@ -447,6 +392,18 @@ export function mine(arena: Arena): PlayerView {
   return arena.players.find((p) => p.isMe)!;
 }
 
+/** The most recent weigh-in, or null. */
+export function latestWeight(arena: Arena): number | null {
+  return arena.myWeighIns[0]?.weight_kg ?? null;
+}
+
+/** Per-food rows for one person, on one day or across the whole window. */
+export function itemsFor(arena: Arena, userId: string, date?: string): FoodItemRow[] {
+  return arena.foodItems.filter(
+    (r) => r.user_id === userId && (date === undefined || r.date === date),
+  );
+}
+
 /**
  * Load the arena and enforce the gates in one go.
  *
@@ -454,8 +411,8 @@ export function mine(arena: Arena): PlayerView {
  * which cost a whole round trip before the page even started its own. The
  * arena already carries that flag, so the check is free here.
  */
-export async function requireArena(windowDays = 30): Promise<Arena> {
-  const arena = await loadArena(windowDays);
+export async function requireArena(options: ArenaOptions = {}): Promise<Arena> {
+  const arena = await loadArena(options);
   if (!arena) redirect("/login");
   if (!arena.me.onboarded) redirect("/onboarding");
   return arena;

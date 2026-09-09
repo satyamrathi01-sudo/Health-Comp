@@ -180,6 +180,20 @@ select.field {
 }
 .rise { animation: rise 0.32s cubic-bezier(0.22, 1, 0.36, 1) both; }
 
+/* The water surface. Each wave path is two bottle-widths long, so sliding it
+   exactly one width left and snapping back reads as continuous motion. */
+@keyframes water-drift {
+  from { transform: translateX(0); }
+  to   { transform: translateX(-118px); }
+}
+.water-wave {
+  animation: water-drift 3.2s linear infinite;
+}
+.water-wave--slow {
+  animation-duration: 5.1s;
+  animation-direction: reverse;
+}
+
 @keyframes pulse-soft {
   0%, 100% { opacity: 1; }
   50%      { opacity: 0.4; }
@@ -190,6 +204,6 @@ select.field {
 .hide-scrollbar { scrollbar-width: none; }
 
 @media (prefers-reduced-motion: reduce) {
-  .rise, .thinking { animation: none; }
+  .rise, .thinking, .water-wave { animation: none; }
   .btn:active:not(:disabled) { transform: none; }
 }

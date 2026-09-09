@@ -3,7 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { createClient } from "@/lib/supabase/client";
-import { localDate } from "@/lib/calc";
+import { localDate, publishedTargets } from "@/lib/calc";
 import type { ActivityLevel, Goal, Profile, Sex } from "@/lib/types";
 
 const EMOJI = ["🔥", "⚡", "🐺", "🦍", "🚀", "🥊", "🦁", "🎯", "💪", "🧊"];
@@ -57,18 +57,26 @@ export default function OnboardingFlow({ profile }: { profile: Profile }) {
     setBusy(true);
     const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || "Asia/Kolkata";
     try {
+      const stats = {
+        display_name: name.trim(),
+        avatar_emoji: emoji,
+        sex,
+        birth_date: birth,
+        height_cm: Number(height),
+        weight_kg: Number(weight),
+        activity_level: activity,
+        goal,
+        timezone: tz,
+      };
+
       const { error } = await supabase
         .from("profiles")
         .update({
-          display_name: name.trim(),
-          avatar_emoji: emoji,
-          sex,
-          birth_date: birth,
-          height_cm: Number(height),
-          weight_kg: Number(weight),
-          activity_level: activity,
-          goal,
-          timezone: tz,
+          ...stats,
+          // The three numbers a rival is allowed to see, published in the same
+          // write as the body they come from. Without this a new player has no
+          // targets on anyone else's scoreboard until their next page load.
+          ...publishedTargets({ ...profile, ...stats }, localDate(tz)),
         })
         .eq("id", profile.id);
       if (error) throw error;

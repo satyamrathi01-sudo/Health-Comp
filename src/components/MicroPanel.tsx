@@ -1,4 +1,4 @@
-import { MICRO_REFS, microTarget, microVerdict } from "@/lib/calc";
+import { MICRO_REFS, microTarget, microVerdict, type MicroContext } from "@/lib/calc";
 import type { DailyTotals, Sex } from "@/lib/types";
 
 const TONE = {
@@ -8,10 +8,25 @@ const TONE = {
 } as const;
 
 /**
- * Micronutrients against Indian (ICMR) reference values. Nothing here feeds
- * the score — it is context, and the input the coach reasons over.
+ * Micronutrients against Indian (ICMR) reference values, every one of them
+ * scaled to this person and this day rather than to a reference adult — see
+ * microTarget() in calc.ts for what moves each one and how strongly.
+ *
+ * Nothing here feeds the score. It is context, and the input the coach
+ * reasons over.
  */
-export default function MicroPanel({ totals, sex }: { totals: DailyTotals | null; sex: Sex | null }) {
+export default function MicroPanel({
+  totals, sex, context,
+}: {
+  totals: DailyTotals | null;
+  sex: Sex | null;
+  /**
+   * Your calorie target, bodyweight and today's training. Without it every
+   * row falls back to the flat reference figure, which is only right for a
+   * 65 kg man eating 2,000 kcal and resting.
+   */
+  context?: MicroContext;
+}) {
   if (!totals || totals.meals === 0) {
     return (
       <p className="px-1 py-3 text-xs text-mist-600">
@@ -22,8 +37,8 @@ export default function MicroPanel({ totals, sex }: { totals: DailyTotals | null
 
   const rows = MICRO_REFS.map((ref) => {
     const value = Number(totals[ref.key] ?? 0);
-    const target = microTarget(ref, sex);
-    return { ref, value, target, verdict: microVerdict(value, ref, sex) };
+    const target = microTarget(ref, sex, context);
+    return { ref, value, target, verdict: microVerdict(value, ref, sex, context) };
   });
 
   // Anything low or over the limit is what you actually need to see.
@@ -62,6 +77,12 @@ export default function MicroPanel({ totals, sex }: { totals: DailyTotals | null
               <p className="mt-1.5 text-[0.65rem] text-mist-600">
                 {verdict === "over" ? "Over the limit — " : "Running low — "}
                 {ref.why.toLowerCase()}
+              </p>
+            )}
+            {context && (
+              <p className="mt-1 text-[0.6rem] text-mist-600">
+                Set by {ref.moves}
+                {ref.perSweat > 0 && context.exerciseKcal > 0 ? " — raised by today's session" : ""}
               </p>
             )}
           </div>

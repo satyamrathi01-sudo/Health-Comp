@@ -6,7 +6,7 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "test": "node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON tests/scoring.test.ts"
+    "test": "node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON tests/scoring.test.ts && node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON tests/analysis.test.ts"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.6",

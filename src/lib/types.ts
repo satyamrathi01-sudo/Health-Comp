@@ -18,6 +18,76 @@ export interface Profile {
   onboarded: boolean;
   active_challenge_id: string | null;
   created_at: string;
+
+  /* --- manual overrides. Null means "work it out for me". --- */
+  bmr_override: number | null;
+  kcal_target_override: number | null;
+  protein_target_g: number | null;
+  carbs_target_g: number | null;
+  fat_target_g: number | null;
+  fiber_target_g: number | null;
+  burn_target_override: number | null;
+  minutes_target_override: number | null;
+  /** Daily water aim in ml. Null derives it from bodyweight and training. */
+  water_target_ml: number | null;
+
+  /* --- "I want to be 70 kg by 30 November" --- */
+  weight_goal_kg: number | null;
+  weight_goal_date: string | null;
+  /** Frozen when the plan was set, so pace is measured from where you began. */
+  weight_goal_start_kg: number | null;
+  weight_goal_set_on: string | null;
+
+  /* --- the published copy of the derived targets --- */
+  target_kcal: number | null;
+  target_protein_g: number | null;
+  target_burn_kcal: number | null;
+  target_active_minutes: number | null;
+}
+
+/**
+ * A competitor, as you are allowed to see them.
+ *
+ * Name, emoji and the three targets their score is judged against — and
+ * nothing about their body. This mirrors the `player_cards` view, which is
+ * where the line is actually enforced; see the v8 note in schema.sql for why
+ * the targets are publishable and the body is not.
+ */
+export interface PlayerCard {
+  id: string;
+  display_name: string;
+  avatar_emoji: string;
+  created_at: string;
+  target_kcal: number | null;
+  target_protein_g: number | null;
+  target_burn_kcal: number | null;
+  target_active_minutes: number | null;
+}
+
+/** Every profile is also a valid card — this is the narrowing. */
+export function toPlayerCard(p: Profile | PlayerCard): PlayerCard {
+  return {
+    id: p.id,
+    display_name: p.display_name,
+    avatar_emoji: p.avatar_emoji,
+    created_at: p.created_at,
+    target_kcal: p.target_kcal,
+    target_protein_g: p.target_protein_g,
+    target_burn_kcal: p.target_burn_kcal,
+    target_active_minutes: p.target_active_minutes,
+  };
+}
+
+/**
+ * One food, on one day, for one person — summed across every meal it
+ * appeared in. The unit the Versus protein breakdown reasons over.
+ */
+export interface FoodItemRow {
+  user_id: string;
+  date: string;
+  name: string;
+  protein_g: number;
+  kcal: number;
 }
 
 export interface FoodItem {
@@ -122,7 +192,7 @@ export interface AdvicePoint {
   kind: "add" | "reduce" | "keep" | "train" | "rest";
   text: string;
   /** Which part of the score this would move. */
-  component?: "burn" | "protein" | "calories" | "minutes" | "logging" | "sleep" | "micros" | "none";
+  component?: "burn" | "protein" | "calories" | "minutes" | "logging" | "sleep" | "water" | "micros" | "none";
   /** Size of the change, in that component's unit. Negative means "less". */
   amount?: number;
   /** Points this would add, computed by the server. */
@@ -153,6 +223,7 @@ export interface DailyTotals extends Micros {
   is_rest_day: boolean;
   sleep_hours: number | null;
   sleep_quality: SleepQuality | null;
+  water_ml: number;
 }
 
 /** A challenge as it appears in the switcher: named by whoever created it. */
@@ -196,7 +267,7 @@ export function emptyDailyTotals(user_id: string, local_date: string): DailyTota
     user_id, local_date,
     kcal_in: 0, protein_g: 0, carbs_g: 0, fat_g: 0, fiber_g: 0, meals: 0,
     kcal_out: 0, active_minutes: 0, sessions: 0, is_rest_day: false,
-    sleep_hours: null, sleep_quality: null,
+    sleep_hours: null, sleep_quality: null, water_ml: 0,
     ...EMPTY_MICROS,
   };
 }

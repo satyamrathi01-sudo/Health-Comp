@@ -1,6 +1,6 @@
 import "server-only";
 import { createHash } from "crypto";
-import { EMPTY_MICROS, MICRO_KEYS, type AdvicePoint, type Confidence, type Exercise, type FoodItem, type Micros } from "./types";
+import { EMPTY_MICROS, MICRO_KEYS, type AdvicePoint, type Confidence, type Exercise, type FoodItem, type Micros } from "./types.ts";
 
 /* ---------------------------------------------------------------------
  * Gemini — server side only. The key must never reach the browser.
@@ -476,7 +476,7 @@ const ADVICE_SCHEMA: SchemaNode = {
           },
           component: {
             type: "STRING",
-            enum: ["burn", "protein", "calories", "minutes", "logging", "sleep", "micros", "none"],
+            enum: ["burn", "protein", "calories", "minutes", "logging", "sleep", "water", "micros", "none"],
             description: "Which part of the score this would move, if any.",
           },
           amount: {
@@ -507,6 +507,9 @@ Give three to five pointers for TOMORROW. Rules:
   and say what to repeat.
 - Comment on sleep only when it was actually logged and is short (under ~7 h) or clearly
   affecting recovery. Never speculate about sleep that was not recorded.
+- Mention water only when they are meaningfully short of the stated aim, or well past it.
+  Use component "water" with the millilitres as the amount. Hitting the aim needs no
+  comment; nagging someone who drank enough is how a tracker gets deleted.
 - Micronutrients are worth a point only when notably low against the stated target, and
   only with a real food fix (iron -> ragi, dates, spinach with lemon; B12 -> curd, milk,
   eggs; vitamin D -> sunlight or a supplement conversation).
@@ -518,7 +521,7 @@ Give three to five pointers for TOMORROW. Rules:
   amount 30 (use "burn" with a kcal amount instead if you mean the energy). "Cut the
   evening namkeen" is component "calories" with a NEGATIVE amount. Sleep and
   micronutrient pointers use "sleep" or "micros" with amount 0 — the app knows those do
-  not move the score and will say so. Be realistic: the amount is what one ordinary day's
+  not move the score and will say so. Water uses "water" with the millilitres to add. Be realistic: the amount is what one ordinary day's
   change would actually deliver.
 - Tone: direct, warm, no cheerleading, no emoji, no exclamation marks. Address them as
   "you". This is a friendly competition between two friends, not a clinic.
@@ -535,7 +538,7 @@ export interface AdviceResult {
 
 const ADVICE_KINDS = ["add", "reduce", "keep", "train", "rest"] as const;
 const IMPACT_COMPONENTS = [
-  "burn", "protein", "calories", "minutes", "logging", "sleep", "micros", "none",
+  "burn", "protein", "calories", "minutes", "logging", "sleep", "water", "micros", "none",
 ] as const;
 
 export async function generateAdvice(summary: string): Promise<AdviceResult> {

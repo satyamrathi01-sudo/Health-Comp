@@ -190,38 +190,39 @@ check("projection cannot push past the ceiling",
 
 
 // ---- goals steer the targets ----
-import { applyGoalsToTargets, daysInMonthOf } from "../src/lib/calc.ts";
+import { applyGoalsToTargets, daysInMonthOf, type DerivedTargets } from "../src/lib/calc.ts";
 
-const baseTargets = {
+const baseTargets: DerivedTargets = {
   bmr: 1700, tdee: 2600, kcalTarget: 2100, proteinTarget: 148, burnTarget: 390,
+  minutesTarget: 60, carbsTarget: 240, fatTarget: 65, fiberTarget: 29, bmi: 24.2, plan: null,
+  basis: { bmr: "formula", kcal: "goal", protein: "formula", burn: "formula", minutes: "formula" },
 };
 
 const proteinGoal = applyGoalsToTargets(
-  baseTargets, [{ metric: "avg_protein_g", target_value: 150 }], 74, 30);
+  baseTargets, [{ metric: "avg_protein_g", target_value: 150 }], 30);
 check("a protein goal overrides the formula", proteinGoal.proteinTarget, 150);
 check("and is marked as coming from the goal", proteinGoal.source.protein, "goal");
 check("untouched targets stay from the profile", proteinGoal.source.burn, "profile");
 
 const burnGoal = applyGoalsToTargets(
-  baseTargets, [{ metric: "total_kcal_burned", target_value: 12000 }], 74, 30);
+  baseTargets, [{ metric: "total_kcal_burned", target_value: 12000 }], 30);
 check("a monthly burn total becomes a daily target", burnGoal.burnTarget, 400);
 
-// A target weight must not contradict the calorie aim.
-const cut = applyGoalsToTargets(baseTargets, [{ metric: "weight_kg", target_value: 68 }], 74, 30);
-check("wanting to be lighter forces a deficit", cut.kcalTarget <= baseTargets.tdee - 400, true);
-const gain = applyGoalsToTargets(baseTargets, [{ metric: "weight_kg", target_value: 80 }], 74, 30);
-check("wanting to be heavier forces a surplus", gain.kcalTarget >= baseTargets.tdee + 250, true);
-const same = applyGoalsToTargets(baseTargets, [{ metric: "weight_kg", target_value: 74 }], 74, 30);
-check("a weight goal at current weight changes nothing", same.kcalTarget, baseTargets.kcalTarget);
+// A target weight no longer steers the calorie aim from here: the profile
+// carries a real plan (a weight AND a date) that produces an exact number in
+// deriveTargets, and this layer must not second-guess it.
+const weightGoal = applyGoalsToTargets(baseTargets, [{ metric: "weight_kg", target_value: 68 }], 30);
+check("a weight goal leaves the calorie aim to the plan",
+  weightGoal.kcalTarget, baseTargets.kcalTarget);
 
 // Goals without a daily equivalent must not corrupt the targets.
 const soft = applyGoalsToTargets(
   baseTargets,
   [{ metric: "workout_days", target_value: 20 }, { metric: "custom", target_value: null }],
-  74, 30);
+  30);
 check("soft goals leave targets alone", soft.proteinTarget, baseTargets.proteinTarget);
 check("nonsense target values are ignored",
-  applyGoalsToTargets(baseTargets, [{ metric: "avg_protein_g", target_value: -5 }], 74, 30).proteinTarget,
+  applyGoalsToTargets(baseTargets, [{ metric: "avg_protein_g", target_value: -5 }], 30).proteinTarget,
   baseTargets.proteinTarget);
 
 check("days in month is right for February 2026", daysInMonthOf("2026-02-10"), 28);

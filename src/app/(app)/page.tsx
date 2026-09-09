@@ -1,7 +1,11 @@
 import Link from "next/link";
-import { mine, requireArena, rival, rivals } from "@/lib/data";
-import { deriveTargets } from "@/lib/calc";
+import { latestWeight, mine, requireArena } from "@/lib/data";
 import { MAX_BASE_SCORE } from "@/lib/scoring";
+import { goalProgress } from "@/lib/goals";
+import { breachedLimits } from "@/lib/limits";
+import { buildPace } from "@/lib/progress";
+import { waterCeilingMl, waterTarget } from "@/lib/hydration";
+import { localHour } from "@/lib/calc";
 import { DataRow, EmptyState, Metric, PageHeader, Ring, Section, StreakBadge } from "@/components/ui";
 import Disclosure from "@/components/Disclosure";
 import AdviceCard from "@/components/AdviceCard";
@@ -9,121 +13,147 @@ import SleepCard from "@/components/SleepCard";
 import RecoveryCard from "@/components/RecoveryCard";
 import MicroPanel from "@/components/MicroPanel";
 import TodayTimeline from "@/components/TodayTimeline";
-import ScoreGap from "@/components/ScoreGap";
-import ChallengeSwitcher from "@/components/ChallengeSwitcher";
+import LimitAlerts from "@/components/LimitAlerts";
+import PlanProgress from "@/components/PlanProgress";
+import WaterBottle from "@/components/WaterBottle";
+import GoalProgress from "@/components/GoalProgress";
 
 export const dynamic = "force-dynamic";
 
 const YOU = "var(--color-lime-glow)";
-const THEM = "var(--color-flame)";
 
+/**
+ * Today is yours alone.
+ *
+ * No rival appears on this screen — not their score, not the gap, not a
+ * leaderboard. Comparison lives on Versus, where you go when you want it.
+ * A dashboard that opens with someone else's number is a dashboard about
+ * someone else.
+ *
+ * The challenge switcher went with them. Nothing here depends on which
+ * challenge you are looking at any more, and a control that changes nothing
+ * you can see is worse than no control at all. It lives on Versus and Goals,
+ * where switching actually changes the screen.
+ */
 export default async function TodayPage() {
-  const arena = await requireArena(30);
+  const arena = await requireArena({ days: 30 });
   const me = mine(arena);
-  const them = rival(arena);
-  const others = rivals(arena);
   const today = arena.today;
 
   const score = me.scores.get(today)!;
   const totals = me.totals.get(today) ?? null;
-  const theirScore = them?.scores.get(today);
-  const targets = deriveTargets(arena.me);
+  const targets = arena.myTargets;
 
   const kcalIn = Math.round(totals?.kcal_in ?? 0);
   const kcalOut = Math.round(totals?.kcal_out ?? 0);
   const protein = Math.round(totals?.protein_g ?? 0);
   const hasData = (totals?.meals ?? 0) > 0 || (totals?.sessions ?? 0) > 0;
-  const todayScoreLogged = score.logged;
 
-  const prettyDate = new Date(today + "T00:00:00").toLocaleDateString("en-GB", {
+  // Today's water aim moves with bodyweight and with what was actually
+  // trained, so it is derived here alongside everything else.
+  const water = waterTarget(arena.me, totals);
+  const hour = localHour(arena.me.timezone);
+
+  // Every ceiling and every micronutrient aim is scaled to this person and
+  // this day, not to a reference adult: see microTarget() in calc.ts.
+  const microContext = targets
+    ? {
+        kcalTarget: targets.kcalTarget,
+        weightKg: arena.me.weight_kg,
+        exerciseKcal: totals?.kcal_out ?? 0,
+      }
+    : undefined;
+
+  // Anything already past its ceiling, worst first. Straight to the top.
+  const limits = breachedLimits(totals, arena.me.sex,
+    targets
+      ? { ...targets, weightKg: arena.me.weight_kg, waterCeilingMl: waterCeilingMl(water) }
+      : null);
+
+  const pace = targets ? buildPace({ days: arena.days, totals: me.totals, targets, today }) : null;
+
+  // My own goals, and how far along they are this month.
+  const monthStart = today.slice(0, 8) + "01";
+  const monthDays = arena.days.filter((d) => d >= monthStart);
+  const myGoals = arena.goals.filter((g) => g.user_id === arena.me.id);
+
+  const monthTotals = monthDays
+    .map((d) => me.totals.get(d))
+    .filter((t): t is NonNullable<typeof t> => Boolean(t));
+  const monthScores = monthDays
+    .map((d) => me.scores.get(d))
+    .filter((s) => s?.logged)
+    .map((s) => s!.total);
+
+  const progressByGoal: Record<string, number | null> = {};
+  for (const goal of myGoals) {
+    progressByGoal[goal.id] = goalProgress({
+      metric: goal.metric,
+      totals: monthTotals,
+      scores: monthScores,
+      latestWeight: latestWeight(arena),
+    });
+  }
+
+  const prettyToday = new Date(today + "T00:00:00").toLocaleDateString("en-GB", {
     weekday: "long", day: "numeric", month: "long",
   });
 
-  const lead = theirScore ? Math.round((score.total - theirScore.total) * 10) / 10 : null;
-
   return (
     <div className="rise space-y-8">
-      <PageHeader
-        title="Today"
-        subtitle={prettyDate}
-        right={<StreakBadge days={me.streak} />}
-      />
+      <PageHeader title="Today" subtitle={prettyToday} right={<StreakBadge days={me.streak} />} />
 
-      {arena.myChallenges.length > 1 && (
-        <ChallengeSwitcher
-          challenges={arena.myChallenges}
-          activeId={arena.challenge?.id ?? null}
-        />
-      )}
+      {/* ---------- what you have already blown ---------- */}
+      <LimitAlerts limits={limits} />
 
       {/* ---------- the one number that matters ---------- */}
       <section className="flex flex-col items-center">
         <Ring value={score.total} max={MAX_BASE_SCORE} label="today's score" />
 
-        {them && theirScore && (
-          <div className="mt-7 w-full">
-            <div className="flex items-center justify-between">
-              <span className="tnum text-lg font-bold" style={{ color: YOU }}>
-                {Math.round(score.total)}
-              </span>
-              <span className="eyebrow">
-                {lead === 0 ? "level" : lead! > 0 ? `you +${Math.abs(lead!)}` : `${them.profile.display_name.split(" ")[0]} +${Math.abs(lead!)}`}
-              </span>
-              <span className="tnum text-lg font-bold" style={{ color: THEM }}>
-                {Math.round(theirScore.total)}
-              </span>
-            </div>
-            <div className="mt-2 flex h-1 overflow-hidden rounded-full bg-ink-800">
-              <div
-                style={{
-                  width: `${score.total + theirScore.total > 0 ? (score.total / (score.total + theirScore.total)) * 100 : 50}%`,
-                  background: YOU,
-                  transition: "width 0.6s ease",
-                }}
-              />
-              <div className="flex-1" style={{ background: THEM }} />
-            </div>
-            <div className="mt-1.5 flex justify-between">
-              <span className="text-[0.65rem] text-mist-600">You</span>
-              <span className="text-[0.65rem] text-mist-600">
-                {them.profile.display_name.split(" ")[0]}
-                {others.length > 1 && ` · leading ${others.length - 1} other${others.length === 2 ? "" : "s"}`}
-              </span>
-            </div>
-          </div>
-        )}
-
         <div className="mt-8 grid w-full grid-cols-3 gap-2">
           <Metric value={kcalIn} unit="kcal" label="eaten"
-            hint={targets ? `of ~${targets.tdee}` : undefined} />
+            hint={targets ? `of ${targets.kcalTarget}` : undefined} />
           <Metric value={protein} unit="g" label="protein" color={YOU}
-            hint={targets ? `of ~${targets.proteinTarget}` : undefined} />
+            hint={targets ? `of ${targets.proteinTarget}` : undefined} />
           <Metric value={kcalOut} unit="kcal" label="burned"
-            hint={`${Math.round(totals?.active_minutes ?? 0)} min`} />
+            hint={targets ? `of ${targets.burnTarget}` : `${Math.round(totals?.active_minutes ?? 0)} min`} />
         </div>
       </section>
+
+      {/* ---------- forward or back, day by day ---------- */}
+      {pace && (
+        <Section
+          title={pace.hasPlan ? "Your plan" : "Last two weeks"}
+          action={
+            !pace.hasPlan ? (
+              <Link href="/me" className="text-xs font-semibold text-lime-glow">Set a target</Link>
+            ) : undefined
+          }
+        >
+          <PlanProgress pace={pace} plan={targets?.plan ?? null} today={today} />
+        </Section>
+      )}
+
+      {/* ---------- water ---------- */}
+      <Section title="Hydration">
+        <WaterBottle
+          target={water}
+          drankMl={totals?.water_ml ?? 0}
+          hour={hour}
+          today={today}
+        />
+      </Section>
 
       {/* ---------- how ready you are ---------- */}
       <RecoveryCard recovery={me.recovery} />
 
-      {/* ---------- why the gap ---------- */}
-      {them && theirScore && (todayScoreLogged || theirScore.logged) && (
-        <Section
-          title="Why the gap"
-          action={
-            <Link href={`/vs/${them.profile.id}`} className="text-xs font-semibold text-lime-glow">
-              Details
-            </Link>
-          }
-        >
-          <ScoreGap
-            mine={score}
-            theirs={theirScore}
-            theirName={them.profile.display_name.split(" ")[0]}
-            compact
-          />
-        </Section>
-      )}
+      {/* ---------- what you said you wanted ---------- */}
+      <Section
+        title="This month"
+        action={<Link href="/goals" className="text-xs font-semibold text-lime-glow">All goals</Link>}
+      >
+        <GoalProgress goals={myGoals} progress={progressByGoal} />
+      </Section>
 
       {/* ---------- what to do about it ---------- */}
       <Section title="For tomorrow">
@@ -157,7 +187,7 @@ export default async function TodayPage() {
         <div className="hair">
           <Disclosure label="Micronutrients">
             <div className="pb-2">
-              <MicroPanel totals={totals} sex={arena.me.sex} />
+              <MicroPanel totals={totals} sex={arena.me.sex} context={microContext} />
             </div>
           </Disclosure>
         </div>
@@ -174,16 +204,6 @@ export default async function TodayPage() {
           <TodayTimeline foods={arena.todayFood} workouts={arena.todayWorkouts} />
         )}
       </Section>
-
-      {!them && (
-        <div className="surface px-5 py-6 text-center">
-          <p className="text-sm font-semibold text-white">No rival yet</p>
-          <p className="mt-1.5 text-xs leading-relaxed text-mist-600">
-            Send your friend the invite code from the Me tab.
-          </p>
-          <Link href="/me" className="btn btn-ghost mt-4 w-full">Get invite code</Link>
-        </div>
-      )}
     </div>
   );
 }

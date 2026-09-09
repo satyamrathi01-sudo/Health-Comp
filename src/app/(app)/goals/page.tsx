@@ -1,67 +1,22 @@
-import { mine, requireArena, rival } from "@/lib/data";
-import { createClient } from "@/lib/supabase/server";
+import { latestWeight, requireArena, rival } from "@/lib/data";
 import { EmptyState, PageHeader, Section } from "@/components/ui";
 import GoalsBoard, { type GoalSuggestion } from "@/components/GoalsBoard";
-import { applyGoalsToTargets, daysInMonthOf, deriveTargets } from "@/lib/calc";
-import type { MonthlyGoal } from "@/lib/types";
+import ChallengeSwitcher from "@/components/ChallengeSwitcher";
+import { GOAL_UNITS, goalProgress } from "@/lib/goals";
+import { daysInMonthOf } from "@/lib/calc";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Goals · FitClash" };
 
-/** Actual value achieved this month for each goal metric. */
-function progressFor(
-  metric: MonthlyGoal["metric"],
-  totals: { kcal_out: number; protein_g: number; sessions: number; meals: number }[],
-  scores: number[],
-  latestWeight: number | null,
-): number | null {
-  const withFood = totals.filter((t) => t.meals > 0);
-  switch (metric) {
-    case "weight_kg":
-      return latestWeight;
-    case "avg_protein_g":
-      return withFood.length
-        ? Math.round(withFood.reduce((a, t) => a + t.protein_g, 0) / withFood.length)
-        : 0;
-    case "total_kcal_burned":
-      return Math.round(totals.reduce((a, t) => a + t.kcal_out, 0));
-    case "workout_days":
-      return totals.filter((t) => t.sessions > 0).length;
-    case "avg_score":
-      return scores.length
-        ? Math.round((scores.reduce((a, s) => a + s, 0) / scores.length) * 10) / 10
-        : 0;
-    default:
-      return null;
-  }
-}
-
 export default async function GoalsPage() {
-  const arena = await requireArena(31);
+  const arena = await requireArena({ days: 31 });
 
-  const supabase = await createClient();
-  const me = mine(arena);
   const them = rival(arena);
 
   // Calendar month, not a rolling window — "what I want to achieve this month".
   const monthStart = arena.today.slice(0, 8) + "01";
-  const userIds = arena.players.map((p) => p.profile.id);
-
-  // get_arena already returned this month's goals for everyone visible, so
-  // only the weigh-ins still need fetching.
-  const { data: weighIns } = await supabase
-    .from("weigh_ins").select("user_id, weight_kg, local_date")
-    .in("user_id", userIds).order("local_date", { ascending: false });
-
-  const goals = arena.goals;
-
-  const latestWeight = (userId: string): number | null => {
-    const row = (weighIns ?? []).find((w) => w.user_id === userId);
-    return row ? Number(row.weight_kg) : null;
-  };
-
-  // Only days inside the current calendar month count towards progress.
   const monthDays = arena.days.filter((d) => d >= monthStart);
+  const goals = arena.goals;
 
   const progressByGoal: Record<string, number | null> = {};
   for (const goal of goals) {
@@ -74,7 +29,14 @@ export default async function GoalsPage() {
       .map((d) => player.scores.get(d))
       .filter((s) => s?.logged)
       .map((s) => s!.total);
-    progressByGoal[goal.id] = progressFor(goal.metric, totals, scores, latestWeight(goal.user_id));
+    progressByGoal[goal.id] = goalProgress({
+      metric: goal.metric,
+      totals,
+      scores,
+      // Only ever my own: weigh-ins are not readable across a challenge, so a
+      // rival's weight goal shows its target and no reading against it.
+      latestWeight: goal.user_id === arena.me.id ? latestWeight(arena) : null,
+    });
   }
 
   const monthLabel = new Date(monthStart + "T00:00:00").toLocaleDateString("en-GB", {
@@ -86,7 +48,7 @@ export default async function GoalsPage() {
 
   // Anchored to their own numbers, so a suggestion is a real stretch rather
   // than a round number pulled out of the air.
-  const base = deriveTargets(arena.me);
+  const base = arena.myTargets;
   const daysThisMonth = daysInMonthOf(arena.today);
   const suggestions: GoalSuggestion[] = base
     ? [
@@ -124,6 +86,10 @@ export default async function GoalsPage() {
     <div className="rise space-y-6">
       <PageHeader title="Goals" subtitle={monthLabel} />
 
+      {arena.myChallenges.length > 1 && (
+        <ChallengeSwitcher challenges={arena.myChallenges} activeId={arena.challenge?.id ?? null} />
+      )}
+
       <GoalsBoard
         userId={arena.me.id}
         month={monthStart}
@@ -149,7 +115,13 @@ export default async function GoalsPage() {
                     </span>
                     {g.target_value !== null && (
                       <span className="tnum mt-0.5 block text-[0.68rem] text-mist-600">
-                        {progressByGoal[g.id] ?? "—"} / {g.target_value}
+                        {g.metric === "weight_kg" ? (
+                          <>target {g.target_value} kg · progress private</>
+                        ) : (
+                          <>
+                            {progressByGoal[g.id] ?? "—"} / {g.target_value} {GOAL_UNITS[g.metric]}
+                          </>
+                        )}
                       </span>
                     )}
                   </span>

@@ -863,3 +863,509 @@ grant execute on function public.get_arena(integer, uuid) to authenticated;
 -- The single-argument form is what older deploys call; drop it so there is
 -- exactly one get_arena and no ambiguity about which overload runs.
 drop function if exists public.get_arena(integer);
+
+-- =====================================================================
+-- v8 — your body is your own business.
+--
+-- Height, weight, age, sex and everything computed from them stop being
+-- readable by the people you are competing against. What a rival can see is
+-- a CARD: name, emoji, and the three daily targets their score is measured
+-- against.
+--
+-- Publishing the targets but not the body is a deliberate line. The targets
+-- are already implied by the scoreboard — 450 kcal burned scoring 30 out of
+-- 35 says the burn target is about 525 whether or not we say so — and
+-- relative scoring is pointless without them. Height and weight are implied
+-- by nothing, so they stay behind the profile.
+--
+-- This is enforced in the database rather than in the UI. The browser holds
+-- an anon key and can run its own queries, so a number left out of a React
+-- component is not hidden at all.
+-- =====================================================================
+
+alter table public.profiles
+  -- Manual overrides. Null means "derive it for me".
+  add column if not exists bmr_override         numeric(6,1),
+  add column if not exists kcal_target_override numeric(6,1),
+  add column if not exists protein_target_g     numeric(6,1),
+  add column if not exists carbs_target_g       numeric(6,1),
+  add column if not exists fat_target_g         numeric(6,1),
+  add column if not exists fiber_target_g       numeric(6,1),
+  add column if not exists burn_target_override numeric(6,1),
+  -- "I want to be 70 kg by 30 November." start_kg is frozen when the plan is
+  -- set so progress is measured from where you actually began, not from
+  -- wherever today's weigh-in happens to sit.
+  add column if not exists weight_goal_kg       numeric(5,1),
+  add column if not exists weight_goal_date     date,
+  add column if not exists weight_goal_start_kg numeric(5,1),
+  add column if not exists weight_goal_set_on   date,
+  -- The published copy of the derived targets: the only part of the body
+  -- calculation a rival ever sees. Written by the app from deriveTargets()
+  -- in src/lib/calc.ts, which stays the single source of truth for the
+  -- formula — mirroring it in SQL would guarantee the two drift apart.
+  add column if not exists target_kcal          integer,
+  add column if not exists target_protein_g     integer,
+  add column if not exists target_burn_kcal     integer;
+
+-- ---------------------------------------------------------------------
+-- player_cards : what a competitor is allowed to know about you.
+--
+-- A definer view (security_invoker = false, the default) so it reads
+-- profiles as the view's owner and the WHERE clause is the whole gate.
+-- can_see() is the same hub-and-spoke rule used everywhere else.
+-- ---------------------------------------------------------------------
+drop view if exists public.player_cards;
+
+create view public.player_cards
+with (security_invoker = false) as
+select
+  p.id,
+  p.display_name,
+  p.avatar_emoji,
+  p.created_at,
+  p.target_kcal,
+  p.target_protein_g,
+  p.target_burn_kcal
+from public.profiles p
+where public.can_see(p.id);
+
+grant select on public.player_cards to authenticated;
+
+-- The row-level twin of the above: a rival's profile row is no longer
+-- readable at all, so `select * from profiles` returns only yourself no
+-- matter who asks. Everything the app needs about someone else now comes
+-- through player_cards.
+drop policy if exists profiles_mates_read on public.profiles;
+
+-- Weigh-in history is a body measurement, so it goes the same way.
+drop policy if exists weigh_ins_mates_read on public.weigh_ins;
+
+-- ---------------------------------------------------------------------
+-- jnum : a number out of a jsonb object, or 0.
+--
+-- The food item arrays are written by this app and always hold numbers,
+-- but one malformed row should degrade a comparison rather than 500 the
+-- whole page, so the cast is guarded.
+-- ---------------------------------------------------------------------
+create or replace function public.jnum(obj jsonb, key text)
+returns numeric
+language sql
+immutable
+as $$
+  select case
+    when jsonb_typeof(obj -> key) = 'number' then (obj ->> key)::numeric
+    when (obj ->> key) ~ '^-?[0-9]+(\.[0-9]+)?$' then (obj ->> key)::numeric
+    else 0
+  end;
+$$;
+
+grant execute on function public.jnum(jsonb, text) to authenticated;
+
+-- ---------------------------------------------------------------------
+-- Bootstrap the published targets for everyone who already exists.
+--
+-- One-time only, and deliberately the plain formula with no manual
+-- overrides applied (nobody has set any yet). The app republishes these
+-- from calc.ts whenever a profile is saved, a weigh-in lands, or a page
+-- load notices they have drifted — so this is a starting point, not a
+-- second implementation to keep in step.
+-- ---------------------------------------------------------------------
+with base as (
+  select
+    p.id,
+    p.goal,
+    p.weight_kg,
+    (10 * p.weight_kg + 6.25 * p.height_cm
+       - 5 * extract(year from age(p.birth_date))
+       + case when p.sex = 'male' then 5 else -161 end) as bmr,
+    case p.activity_level
+      when 'sedentary' then 1.2  when 'light' then 1.375
+      when 'active'    then 1.725 when 'very_active' then 1.9
+      else 1.55 end as factor
+  from public.profiles p
+  where p.sex is not null and p.birth_date is not null
+    and p.height_cm is not null and p.weight_kg is not null
+    and p.target_kcal is null
+)
+update public.profiles p
+   set target_kcal      = greatest(1200, round(b.bmr * b.factor
+                            + case b.goal when 'cut' then -500 when 'bulk' then 300 else 0 end)),
+       target_protein_g = round(b.weight_kg
+                            * case b.goal when 'cut' then 2.0 when 'bulk' then 1.8 else 1.6 end),
+       target_burn_kcal = greatest(200, round(b.bmr * b.factor * 0.15))
+  from base b
+ where p.id = b.id;
+
+-- ---------------------------------------------------------------------
+-- get_arena v8
+--
+-- Same one-round-trip contract as before, with two changes:
+--   * rivals arrive as cards, so their body stats cannot leave the database
+--   * food_days > 0 additionally returns per-item food rollups for everyone
+--     visible, which is what the Versus protein breakdown reasons over.
+--     Pages that do not need it pass 0 and carry none of the weight.
+--
+-- All three arguments are required. The older two-argument form is dropped
+-- below rather than left as an overload: with a default on food_days,
+-- PostgREST could not tell the two apart.
+-- ---------------------------------------------------------------------
+create or replace function public.get_arena(
+  days integer,
+  challenge_id uuid,
+  food_days integer
+)
+returns jsonb
+language plpgsql
+stable
+security invoker
+set search_path = public
+as $$
+declare
+  uid        uuid := auth.uid();
+  me_row     public.profiles;
+  ch         public.challenges;
+  member_ids uuid[];
+  today      date;
+  from_date  date;
+  food_from  date;
+  wanted     uuid;
+begin
+  if uid is null then
+    return null;
+  end if;
+
+  select * into me_row from public.profiles where id = uid;
+  if not found then
+    return null;
+  end if;
+
+  today     := (now() at time zone coalesce(me_row.timezone, 'Asia/Kolkata'))::date;
+  from_date := today - (greatest(coalesce(days, 30), 1) - 1);
+  food_from := today - (greatest(coalesce(food_days, 0), 1) - 1);
+
+  wanted := coalesce(challenge_id, me_row.active_challenge_id);
+
+  if wanted is not null then
+    select c.* into ch
+    from public.challenge_members m
+    join public.challenges c on c.id = m.challenge_id
+    where m.user_id = uid and c.id = wanted;
+  end if;
+
+  if ch.id is null then
+    select c.* into ch
+    from public.challenge_members m
+    join public.challenges c on c.id = m.challenge_id
+    where m.user_id = uid
+    order by m.joined_at desc
+    limit 1;
+  end if;
+
+  -- RLS on challenge_members already narrows this to people I may see.
+  if ch.id is not null then
+    select array_agg(m.user_id) into member_ids
+      from public.challenge_members m
+     where m.challenge_id = ch.id;
+  end if;
+
+  if member_ids is null then
+    member_ids := array[uid];
+  end if;
+
+  return jsonb_build_object(
+    'today',     today,
+    'from_date', from_date,
+    -- My own row, in full. Nobody else's ever appears here.
+    'me',        to_jsonb(me_row),
+    'challenge', case when ch.id is null then null else to_jsonb(ch) end,
+    'players',   coalesce(
+                   (select jsonb_agg(to_jsonb(c) order by c.created_at)
+                      from public.player_cards c
+                     where c.id = any(member_ids)), '[]'::jsonb),
+    'totals',    coalesce(
+                   (select jsonb_agg(to_jsonb(t))
+                      from public.daily_totals t
+                     where t.user_id = any(member_ids)
+                       and t.local_date between from_date and today), '[]'::jsonb),
+    'goals',     coalesce(
+                   (select jsonb_agg(to_jsonb(g))
+                      from public.monthly_goals g
+                     where g.user_id = any(member_ids)
+                       and g.month = date_trunc('month', today)::date), '[]'::jsonb),
+    'today_food', coalesce(
+                   (select jsonb_agg(to_jsonb(f) order by f.logged_at)
+                      from public.food_logs f
+                     where f.user_id = uid and f.local_date = today), '[]'::jsonb),
+    'today_workouts', coalesce(
+                   (select jsonb_agg(to_jsonb(w) order by w.logged_at)
+                      from public.workout_logs w
+                     where w.user_id = uid and w.local_date = today), '[]'::jsonb),
+    -- My own weigh-ins. Mine only, by policy as well as by this filter:
+    -- a weigh-in is a body measurement, so v8 stopped challenge-mates being
+    -- able to read them at all. Carried here so the three screens that want
+    -- the current weight do not each make their own round trip for it.
+    'my_weigh_ins', coalesce(
+                   (select jsonb_agg(jsonb_build_object(
+                             'local_date', w.local_date,
+                             'weight_kg',  w.weight_kg) order by w.local_date desc)
+                      from (select local_date, weight_kg
+                              from public.weigh_ins
+                             where user_id = uid
+                             order by local_date desc
+                             limit 60) w), '[]'::jsonb),
+    'my_challenges', coalesce(
+                   (select jsonb_agg(jsonb_build_object(
+                              'id',           c.id,
+                              'name',         c.name,
+                              'invite_code',  c.invite_code,
+                              'start_date',   c.start_date,
+                              'end_date',     c.end_date,
+                              'created_by',   c.created_by,
+                              'is_mine',      c.created_by = uid,
+                              'owner_name',   coalesce(op.display_name, 'Someone'),
+                              'owner_emoji',  coalesce(op.avatar_emoji, '🔥'),
+                              'member_count', (select count(*) from public.challenge_members mm
+                                                where mm.challenge_id = c.id)
+                            ) order by m2.joined_at desc)
+                      from public.challenge_members m2
+                      join public.challenges c on c.id = m2.challenge_id
+                      left join public.player_cards op on op.id = c.created_by
+                     where m2.user_id = uid), '[]'::jsonb),
+    -- Per-person, per-day, per-food protein and calories. Rolled up here
+    -- rather than shipped raw: one row per distinct food per day keeps the
+    -- payload small enough that the comparison costs nothing extra.
+    'food_items', case when coalesce(food_days, 0) <= 0 then '[]'::jsonb else coalesce(
+                   (select jsonb_agg(jsonb_build_object(
+                             'user_id',   x.user_id,
+                             'date',      x.local_date,
+                             'name',      x.name,
+                             'protein_g', x.protein_g,
+                             'kcal',      x.kcal))
+                      from (
+                        select f.user_id,
+                               f.local_date,
+                               min(btrim(it ->> 'name'))                     as name,
+                               round(sum(public.jnum(it, 'protein_g')), 1)   as protein_g,
+                               round(sum(public.jnum(it, 'kcal')))           as kcal
+                          from public.food_logs f
+                          cross join lateral jsonb_array_elements(f.items) as it
+                         where f.user_id = any(member_ids)
+                           and f.local_date between food_from and today
+                           and btrim(coalesce(it ->> 'name', '')) <> ''
+                         group by f.user_id, f.local_date, lower(btrim(it ->> 'name'))
+                      ) x), '[]'::jsonb) end
+  );
+end;
+$$;
+
+grant execute on function public.get_arena(integer, uuid, integer) to authenticated;
+
+-- Exactly one get_arena, so there is never any question which overload ran.
+drop function if exists public.get_arena(integer, uuid);
+
+-- =====================================================================
+-- v9 — water.
+--
+-- One row per person per day rather than one per sip. Drinking is the
+-- highest-frequency thing anyone logs here — a dozen taps a day each — and
+-- the only question the app ever asks of it is "how much so far". An event
+-- table would be a hundred rows a week to answer a question a single
+-- integer answers.
+--
+-- The trade-off is that "when did I last drink" is not recoverable beyond
+-- updated_at. That is worth it; if a timeline is ever wanted, this becomes
+-- the daily rollup of one.
+-- =====================================================================
+
+create table if not exists public.water_logs (
+  user_id    uuid not null references auth.users(id) on delete cascade,
+  local_date date not null,
+  ml         integer not null default 0 check (ml >= 0),
+  updated_at timestamptz not null default now(),
+  created_at timestamptz not null default now(),
+  primary key (user_id, local_date)
+);
+
+alter table public.water_logs enable row level security;
+
+drop policy if exists water_logs_own on public.water_logs;
+create policy water_logs_own on public.water_logs for all to authenticated
+  using (user_id = auth.uid()) with check (user_id = auth.uid());
+
+-- Visible to challenge-mates like food and training are: what you drink is
+-- behaviour, not a body measurement, and the whole point of the challenge is
+-- seeing what the other person actually did.
+drop policy if exists water_logs_mates_read on public.water_logs;
+create policy water_logs_mates_read on public.water_logs for select to authenticated
+  using (public.can_see(user_id));
+
+-- A manual daily target, for anyone who would rather set their own.
+alter table public.profiles
+  add column if not exists water_target_ml integer;
+
+-- ---------------------------------------------------------------------
+-- log_water(delta, date) -> the new total.
+--
+-- One round trip per tap, and atomic: two quick taps cannot read the same
+-- total and both write it back. Returning the new figure means the button
+-- does not need a follow-up read to know what to draw.
+--
+-- SECURITY INVOKER, so the own-row policy above is what authorises the
+-- write; there is no path here to anyone else's row.
+-- ---------------------------------------------------------------------
+create or replace function public.log_water(delta_ml integer, on_date date default null)
+returns integer
+language plpgsql
+security invoker
+set search_path = public
+as $$
+declare
+  uid   uuid := auth.uid();
+  d     date;
+  total integer;
+begin
+  if uid is null then
+    raise exception 'Not signed in';
+  end if;
+
+  -- The caller passes the date it is already showing. The fallback is only
+  -- for a client that has not got one to hand.
+  d := coalesce(on_date, (now() at time zone coalesce(
+         (select timezone from public.profiles where id = uid), 'Asia/Kolkata'))::date);
+
+  insert into public.water_logs (user_id, local_date, ml, updated_at)
+  values (uid, d, greatest(0, coalesce(delta_ml, 0)), now())
+  on conflict (user_id, local_date) do update
+    set ml = greatest(0, public.water_logs.ml + coalesce(delta_ml, 0)),
+        updated_at = now()
+  returning ml into total;
+
+  return total;
+end;
+$$;
+
+grant execute on function public.log_water(integer, date) to authenticated;
+
+-- ---------------------------------------------------------------------
+-- daily_totals, again — now carrying water.
+--
+-- Dropped and recreated rather than replaced, for the same reason as
+-- before: CREATE OR REPLACE VIEW cannot add a column in the middle, and
+-- this file has to stay re-runnable.
+--
+-- water_logs joins the `days` union so a day where someone only drank
+-- still produces a row. It does NOT make the day count as logged for the
+-- score or the streak — scoreDay() reads meals, sessions and rest days,
+-- and hydration is tracked but deliberately unscored, like sleep.
+-- ---------------------------------------------------------------------
+drop view if exists public.daily_totals;
+
+create view public.daily_totals
+with (security_invoker = true) as
+with days as (
+  select user_id, local_date from public.food_logs
+  union select user_id, local_date from public.workout_logs
+  union select user_id, local_date from public.rest_days
+  union select user_id, local_date from public.sleep_logs
+  union select user_id, local_date from public.water_logs
+)
+select
+  d.user_id,
+  d.local_date,
+  coalesce(f.kcal_in, 0)        as kcal_in,
+  coalesce(f.protein_g, 0)      as protein_g,
+  coalesce(f.carbs_g, 0)        as carbs_g,
+  coalesce(f.fat_g, 0)          as fat_g,
+  coalesce(f.fiber_g, 0)        as fiber_g,
+  coalesce(f.meals, 0)          as meals,
+  coalesce(w.kcal_out, 0)       as kcal_out,
+  coalesce(w.minutes, 0)        as active_minutes,
+  coalesce(w.sessions, 0)       as sessions,
+  (r.user_id is not null)       as is_rest_day,
+  coalesce(f.sodium_mg, 0)      as sodium_mg,
+  coalesce(f.potassium_mg, 0)   as potassium_mg,
+  coalesce(f.calcium_mg, 0)     as calcium_mg,
+  coalesce(f.iron_mg, 0)        as iron_mg,
+  coalesce(f.magnesium_mg, 0)   as magnesium_mg,
+  coalesce(f.zinc_mg, 0)        as zinc_mg,
+  coalesce(f.vitamin_c_mg, 0)   as vitamin_c_mg,
+  coalesce(f.vitamin_d_ug, 0)   as vitamin_d_ug,
+  coalesce(f.vitamin_b12_ug, 0) as vitamin_b12_ug,
+  coalesce(f.folate_ug, 0)      as folate_ug,
+  coalesce(f.sugar_g, 0)        as sugar_g,
+  coalesce(f.satfat_g, 0)       as satfat_g,
+  s.hours                       as sleep_hours,
+  s.quality                     as sleep_quality,
+  coalesce(h.ml, 0)             as water_ml
+from days d
+left join (
+  select user_id, local_date,
+         sum(kcal) kcal_in, sum(protein_g) protein_g, sum(carbs_g) carbs_g,
+         sum(fat_g) fat_g, sum(fiber_g) fiber_g, count(*) meals,
+         sum(sodium_mg) sodium_mg, sum(potassium_mg) potassium_mg,
+         sum(calcium_mg) calcium_mg, sum(iron_mg) iron_mg,
+         sum(magnesium_mg) magnesium_mg, sum(zinc_mg) zinc_mg,
+         sum(vitamin_c_mg) vitamin_c_mg, sum(vitamin_d_ug) vitamin_d_ug,
+         sum(vitamin_b12_ug) vitamin_b12_ug, sum(folate_ug) folate_ug,
+         sum(sugar_g) sugar_g, sum(satfat_g) satfat_g
+  from public.food_logs group by user_id, local_date
+) f on f.user_id = d.user_id and f.local_date = d.local_date
+left join (
+  select user_id, local_date,
+         sum(kcal) kcal_out, sum(minutes) minutes, count(*) sessions
+  from public.workout_logs group by user_id, local_date
+) w on w.user_id = d.user_id and w.local_date = d.local_date
+left join public.rest_days  r on r.user_id = d.user_id and r.local_date = d.local_date
+left join public.sleep_logs s on s.user_id = d.user_id and s.local_date = d.local_date
+left join public.water_logs h on h.user_id = d.user_id and h.local_date = d.local_date;
+
+-- =====================================================================
+-- v10 — the last absolute target.
+--
+-- Active minutes were 60 for everybody. They are now derived from your own
+-- burn target at a moderate intensity, so an active person chasing a 600
+-- kcal day is asked for more of them than a sedentary one chasing 250.
+--
+-- It has to be published like the other three: a rival scores your day from
+-- your card, and the minutes figure is computed from your bodyweight, which
+-- is exactly what a card must never carry.
+--
+-- Worth knowing what this does NOT change much: minutes-to-target is close
+-- to weight-independent, because a heavier body burns proportionally more
+-- per minute. So it lands near an hour for most people — but it is now an
+-- hour BECAUSE of their numbers rather than in spite of them, and it moves
+-- properly when the burn target or activity level does.
+-- =====================================================================
+
+alter table public.profiles
+  add column if not exists minutes_target_override integer,
+  add column if not exists target_active_minutes   integer;
+
+drop view if exists public.player_cards;
+
+create view public.player_cards
+with (security_invoker = false) as
+select
+  p.id,
+  p.display_name,
+  p.avatar_emoji,
+  p.created_at,
+  p.target_kcal,
+  p.target_protein_g,
+  p.target_burn_kcal,
+  p.target_active_minutes
+from public.profiles p
+where public.can_see(p.id);
+
+grant select on public.player_cards to authenticated;
+
+-- Bootstrap, on the same terms as the v8 backfill: the plain derivation for
+-- anyone who already has a burn target, republished from calc.ts on their
+-- next page load.
+update public.profiles
+   set target_active_minutes = greatest(25, least(90,
+         round(target_burn_kcal / ((5 * 3.5 * weight_kg) / 200))))
+ where target_active_minutes is null
+   and target_burn_kcal is not null
+   and weight_kg is not null
+   and weight_kg > 0;

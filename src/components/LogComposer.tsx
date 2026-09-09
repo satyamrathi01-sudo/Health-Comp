@@ -4,10 +4,21 @@ import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { burnKcal, guessMealSlot, localHour } from "@/lib/calc";
+import { SCORING } from "@/lib/scoring";
+import { mealKcal, rescaleMicros, scaleItemToQty } from "@/lib/portions";
 import { EMPTY_MICROS, type Confidence, type Exercise, type FoodItem, type MealSlot, type Micros, type Profile } from "@/lib/types";
 import { PageHeader } from "./ui";
 
 type Tab = "food" | "workout";
+/**
+ * How a workout gets into the app.
+ *
+ * "describe" is the AI path. "calories" is for when you already know the
+ * number — a treadmill readout, a watch, a class that told you — and being
+ * made to write a sentence for a machine to guess at what you can read off a
+ * screen is just friction. The number you type is the number that is stored.
+ */
+type BurnMode = "describe" | "calories";
 
 const SLOTS: { value: MealSlot; label: string }[] = [
   { value: "breakfast", label: "Breakfast" },
@@ -20,6 +31,12 @@ const FOOD_PLACEHOLDER =
   "3 rotis, a katori of dal tadka, half plate rice, salad and a glass of buttermilk";
 const WORKOUT_PLACEHOLDER =
   "45 min gym — bench 4x8 at 60kg, rows 4x10, then 20 min treadmill run 4 km";
+
+/** Everything but qty, so a scaled item is not overwritten by the raw patch. */
+function omitQty(patch: Partial<FoodItem>): Partial<FoodItem> {
+  const { qty: _qty, ...rest } = patch;
+  return rest;
+}
 
 const blankItem = (): FoodItem => ({
   name: "", qty: 1, unit: "serving", kcal: 0, protein_g: 0, carbs_g: 0, fat_g: 0, fiber_g: 0,
@@ -37,6 +54,10 @@ export default function LogComposer({
   const supabase = createClient();
 
   const [tab, setTab] = useState<Tab>("food");
+  const [burnMode, setBurnMode] = useState<BurnMode>("describe");
+  const [burnKcalInput, setBurnKcalInput] = useState("");
+  const [burnMinutes, setBurnMinutes] = useState("");
+  const [burnLabel, setBurnLabel] = useState("");
   const [text, setText] = useState("");
   const [slot, setSlot] = useState<MealSlot>(() => guessMealSlot(localHour(profile.timezone)));
 
@@ -87,7 +108,50 @@ export default function LogComposer({
   function switchTab(next: Tab) {
     setTab(next);
     setText("");
+    setBurnMode("describe");
     reset();
+  }
+
+  /**
+   * Save a burn figure the user already has, with no model in the loop.
+   *
+   * The MET is back-computed from the calories so the stored exercise stays
+   * internally consistent with everything else in the app — the same session
+   * re-read later still says kcal = MET x 3.5 x kg / 200 x minutes. With no
+   * minutes given there is no rate to express, so it is left at zero and the
+   * calories stand on their own.
+   */
+  async function saveManualBurn() {
+    setError(null);
+    const kcal = Math.round(Number(burnKcalInput));
+    const minutes = Math.round(Number(burnMinutes) || 0);
+    if (!(kcal > 0)) { setError("Enter how many calories you burned."); return; }
+    if (kcal > 10000 || minutes > 600) { setError("That looks like a typo — check the numbers."); return; }
+
+    setBusy("save");
+    const name = burnLabel.trim() || "Workout";
+    const met = minutes > 0
+      ? Math.round(((kcal * 200) / (3.5 * bodyWeight * minutes)) * 10) / 10
+      : 0;
+
+    const { error: err } = await supabase.from("workout_logs").insert({
+      user_id: profile.id,
+      local_date: today,
+      raw_text: name,
+      exercises: [{
+        name, kind: "other", met, minutes,
+        sets: null, reps: null, weight_kg: null, distance_km: null, kcal,
+      }],
+      minutes,
+      kcal,
+      body_weight_kg: bodyWeight,
+      confidence: "high",
+      source: "manual",
+    });
+
+    if (err) { setError(err.message); setBusy(null); return; }
+    router.push("/");
+    router.refresh();
   }
 
   async function analyse() {
@@ -180,8 +244,35 @@ export default function LogComposer({
 
   /* ---------------- item editing ---------------- */
 
-  const patchItem = (idx: number, patch: Partial<FoodItem>) =>
-    setItems((prev) => prev?.map((it, i) => (i === idx ? { ...it, ...patch } : it)) ?? prev);
+  /**
+   * Editing an item re-prices it. The arithmetic lives in lib/portions.ts so
+   * it can be tested; this is the wiring.
+   */
+  function patchItem(idx: number, patch: Partial<FoodItem>) {
+    const list = items;
+    if (!list?.[idx]) return;
+
+    const before = list[idx];
+    const merged =
+      patch.qty !== undefined
+        ? { ...scaleItemToQty(before, patch.qty), ...omitQty(patch) }
+        : { ...before, ...patch };
+
+    const next = list.map((it, i) => (i === idx ? merged : it));
+    applyEdit(list, next);
+  }
+
+  function removeItem(idx: number) {
+    const list = items;
+    if (!list) return;
+    applyEdit(list, list.filter((_, j) => j !== idx));
+  }
+
+  /** Commit an item list, moving the meal's micronutrients with its calories. */
+  function applyEdit(before: FoodItem[], after: FoodItem[]) {
+    setItems(after);
+    setMicros((m) => rescaleMicros(m, mealKcal(before), mealKcal(after)));
+  }
 
   const patchExercise = (idx: number, patch: Partial<Exercise>) =>
     setExercises((prev) =>
@@ -211,6 +302,25 @@ export default function LogComposer({
         ))}
       </div>
 
+      {tab === "workout" && (
+        <div className="grid grid-cols-2 gap-1 rounded-xl bg-ink-900 p-1">
+          {([
+            ["describe", "Describe it"],
+            ["calories", "I know the calories"],
+          ] as [BurnMode, string][]).map(([value, label]) => (
+            <button
+              key={value}
+              onClick={() => { setBurnMode(value); setError(null); reset(); }}
+              className={`rounded-lg py-2 text-xs font-semibold transition-colors ${
+                burnMode === value ? "bg-ink-800 text-white" : "text-mist-600"
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      )}
+
       {tab === "food" && (
         <div className="hide-scrollbar flex gap-2 overflow-x-auto">
           {SLOTS.map((s) => (
@@ -226,6 +336,67 @@ export default function LogComposer({
         </div>
       )}
 
+      {tab === "workout" && burnMode === "calories" ? (
+        <div className="space-y-4">
+          <div className="surface space-y-3.5 p-5">
+            <label className="block">
+              <span className="eyebrow mb-2 block">Calories burned</span>
+              <input
+                className="field tnum text-2xl font-bold" type="number" inputMode="numeric"
+                value={burnKcalInput} onChange={(e) => setBurnKcalInput(e.target.value)}
+                placeholder="420" autoFocus
+              />
+            </label>
+
+            <div className="grid grid-cols-2 gap-3">
+              <label className="block">
+                <span className="eyebrow mb-2 block">Minutes</span>
+                <input
+                  className="field tnum" type="number" inputMode="numeric"
+                  value={burnMinutes} onChange={(e) => setBurnMinutes(e.target.value)}
+                  placeholder="optional"
+                />
+              </label>
+              <label className="block">
+                <span className="eyebrow mb-2 block">What was it?</span>
+                <input
+                  className="field" value={burnLabel}
+                  onChange={(e) => setBurnLabel(e.target.value)} placeholder="Treadmill"
+                />
+              </label>
+            </div>
+
+            <p className="text-[0.68rem] leading-relaxed text-mist-600">
+              Stored exactly as typed. Minutes are optional, but active minutes are
+              worth up to {SCORING.activeMinutes.max} points of their own, so they are
+              worth adding.
+            </p>
+          </div>
+
+          {error && (
+            <p className="rounded-lg border border-danger/40 bg-danger/10 px-3 py-2 text-xs leading-relaxed text-danger">
+              {error}
+            </p>
+          )}
+
+          <button
+            className="btn btn-primary w-full"
+            disabled={busy !== null || !(Number(burnKcalInput) > 0)}
+            onClick={saveManualBurn}
+          >
+            {busy === "save" ? "Saving…" : "Save to today"}
+          </button>
+
+          <button
+            className={`btn w-full ${isRestDay ? "btn-primary" : "btn-ghost"}`}
+            onClick={toggleRestDay}
+            disabled={busy !== null}
+          >
+            {isRestDay ? "✓ Marked as a rest day" : "😴 Mark today as a rest day"}
+          </button>
+        </div>
+      ) : (
+      <>
       <div>
         <textarea
           className="field min-h-28 resize-none leading-relaxed"
@@ -339,6 +510,10 @@ export default function LogComposer({
                     <div className="eyebrow mt-0.5">{label}</div>
                   </div>
                 ))}
+                <p className="col-span-4 mt-1 text-[0.62rem] leading-relaxed text-mist-600">
+                  Meal-level, so these move with the meal&apos;s calories when you change a
+                  portion — they are not split per item.
+                </p>
               </div>
             )}
 
@@ -368,7 +543,7 @@ export default function LogComposer({
                       </button>
                       <button
                         className="shrink-0 px-1 text-lg leading-none text-mist-500"
-                        onClick={() => setItems((p) => p?.filter((_, j) => j !== i) ?? p)}
+                        onClick={() => removeItem(i)}
                         aria-label="Remove item"
                       >
                         ×
@@ -383,7 +558,9 @@ export default function LogComposer({
 
                     {tuning === i && (
                       <div className="mt-3 grid grid-cols-3 gap-2">
-                        <NumField label="Qty" value={item.qty} onChange={(v) => patchItem(i, { qty: v })} />
+                        <NumField label="Qty" value={item.qty}
+                          hint="rescales the rest"
+                          onChange={(v) => patchItem(i, { qty: v })} />
                         <TextField label="Unit" value={item.unit} onChange={(v) => patchItem(i, { unit: v })} />
                         <NumField label="kcal" value={item.kcal} onChange={(v) => patchItem(i, { kcal: v })} />
                         <NumField label="Protein g" value={item.protein_g} onChange={(v) => patchItem(i, { protein_g: v })} />
@@ -468,6 +645,8 @@ export default function LogComposer({
           {isRestDay ? "✓ Marked as a rest day" : "😴 Mark today as a rest day"}
         </button>
       )}
+      </>
+      )}
     </div>
   );
 }
@@ -481,12 +660,15 @@ function blankExercise(bodyWeight: number): Exercise {
 }
 
 function NumField({
-  label, value, onChange, step = 1,
-}: { label: string; value: number; onChange: (v: number) => void; step?: number }) {
+  label, value, onChange, step = 1, hint,
+}: {
+  label: string; value: number; onChange: (v: number) => void; step?: number; hint?: string;
+}) {
   return (
     <label className="block">
       <span className="eyebrow mb-1.5 block">
         {label}
+        {hint && <span className="ml-1 normal-case tracking-normal opacity-70">· {hint}</span>}
       </span>
       <input
         className="field tnum py-1.5 text-sm"

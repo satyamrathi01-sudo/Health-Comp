@@ -1,18 +1,22 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { mine, requireArena } from "@/lib/data";
+import { itemsFor, mine, requireArena } from "@/lib/data";
 import { dayOutcome } from "@/lib/scoring";
+import { compareProtein } from "@/lib/versus";
 import { EmptyState, PageHeader, Section } from "@/components/ui";
 import ScoreGap from "@/components/ScoreGap";
+import ProteinVersus from "@/components/ProteinVersus";
 
 export const dynamic = "force-dynamic";
 
 const YOU = "var(--color-lime-glow)";
 const THEM = "var(--color-flame)";
 
+const FOOD_WINDOW = 14;
+
 export default async function OneOnOnePage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const arena = await requireArena(30);
+  const arena = await requireArena({ days: 30, foodDays: FOOD_WINDOW });
 
   const me = mine(arena);
   // RLS decides who is even loadable, so an unreachable rival is a genuine 404
@@ -50,6 +54,25 @@ export default async function OneOnOnePage({ params }: { params: Promise<{ id: s
   const todayMine = me.scores.get(arena.today)!;
   const todayTheirs = them.scores.get(arena.today)!;
 
+  const proteinArgs = {
+    mineTarget: me.targets?.proteinTarget ?? 0,
+    theirTarget: them.targets?.proteinTarget ?? 0,
+    theirName: firstName,
+  };
+
+  // Both scopes here, because they answer different questions: today is what
+  // you can still act on, the fortnight is where the pattern lives.
+  const todayProtein = compareProtein({
+    ...proteinArgs,
+    mineItems: itemsFor(arena, arena.me.id, arena.today),
+    theirItems: itemsFor(arena, them.profile.id, arena.today),
+  });
+  const windowProtein = compareProtein({
+    ...proteinArgs,
+    mineItems: itemsFor(arena, arena.me.id),
+    theirItems: itemsFor(arena, them.profile.id),
+  });
+
   return (
     <div className="rise space-y-8">
       <PageHeader
@@ -81,6 +104,21 @@ export default async function OneOnOnePage({ params }: { params: Promise<{ id: s
           <div className="mt-2 text-xs text-mist-600">{firstName}</div>
         </div>
       </section>
+
+      {/* ---------- what actually made the protein gap ---------- */}
+      {!todayProtein.empty && (
+        <Section title="Protein today, food by food">
+          <ProteinVersus comparison={todayProtein} theirName={firstName} scope="today" />
+        </Section>
+      )}
+
+      <Section title={`Protein over ${FOOD_WINDOW} days`}>
+        <ProteinVersus
+          comparison={windowProtein}
+          theirName={firstName}
+          scope={`the last ${FOOD_WINDOW} days`}
+        />
+      </Section>
 
       {/* ---------- today, explained ---------- */}
       <Section title="Today, line by line">
@@ -131,6 +169,12 @@ export default async function OneOnOnePage({ params }: { params: Promise<{ id: s
           </div>
         )}
       </Section>
+
+      <p className="px-1 text-[0.62rem] leading-relaxed text-mist-600">
+        {firstName} is scored against {firstName}&apos;s own targets and you against yours, so
+        this is a comparison of effort. Neither of you can see the other&apos;s height, weight,
+        age or weigh-ins.
+      </p>
     </div>
   );
 }
