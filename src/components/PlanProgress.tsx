@@ -54,7 +54,7 @@ export default function PlanProgress({
         <p className="mt-1 text-[0.7rem] leading-relaxed text-mist-600">
           {plan
             ? `${plan.direction === "lose" ? "Down" : "Up"} to ${plan.targetKg} kg by ${prettyDate(plan.targetDate)} · ${plan.kgToGo} kg to go`
-            : "Set a target weight and a date on the Me tab to walk a real plan."}
+            : "Set a target weight and a date on the Goals tab to walk a real plan."}
         </p>
       </div>
 

@@ -4,7 +4,8 @@ import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import {
-  addDays, bmiBand, deriveTargets, prettyDate, publishedTargets, type DerivedTargets,
+  addDays, bmiBand, deriveTargets, prettyDate, publishedTargets,
+  type DerivedTargets, type GoalLike,
 } from "@/lib/calc";
 import { litres, waterTarget } from "@/lib/hydration";
 import type { Profile } from "@/lib/types";
@@ -47,7 +48,14 @@ const numOrNull = (v: string): number | null => {
   return v.trim() !== "" && Number.isFinite(n) && n > 0 ? Math.round(n * 10) / 10 : null;
 };
 
-export default function TargetsEditor({ profile, today }: { profile: Profile; today: string }) {
+export default function TargetsEditor({
+  profile, today, goals,
+}: {
+  profile: Profile;
+  today: string;
+  /** This month's goals, folded into what gets published — see publishedTargets(). */
+  goals: GoalLike[];
+}) {
   const router = useRouter();
 
   const [open, setOpen] = useState(false);
@@ -114,7 +122,7 @@ export default function TargetsEditor({ profile, today }: { profile: Profile; to
       weight_goal_set_on: candidate.weight_goal_kg ? candidate.weight_goal_set_on : null,
       // Republished in the same write, so a rival's scoreboard never lags
       // behind a change made here.
-      ...publishedTargets(candidate, today),
+      ...publishedTargets(candidate, today, goals),
     };
 
     const { error: err } = await supabase.from("profiles").update(patch).eq("id", profile.id);
@@ -137,10 +145,13 @@ export default function TargetsEditor({ profile, today }: { profile: Profile; to
         className="surface flex w-full items-center justify-between px-5 py-4 text-left"
       >
         <div className="min-w-0">
-          <div className="eyebrow">Your targets</div>
+          <div className="eyebrow">Change your targets</div>
+          {/* The figures themselves are on the tiles above. Repeating them here
+              would put the formula's numbers beside the goal-adjusted ones the
+              score uses, and the two disagree whenever a goal is set. */}
           <p className="mt-1.5 truncate text-sm text-mist-200">
             {preview
-              ? `${preview.kcalTarget} kcal · ${preview.proteinTarget} g protein · ${preview.burnTarget} kcal burn`
+              ? "Weight plan, resting burn, macros, burn and water"
               : "Not enough profile data yet"}
           </p>
           <p className="mt-0.5 text-[0.65rem] text-mist-600">
@@ -310,9 +321,9 @@ export default function TargetsEditor({ profile, today }: { profile: Profile; to
       </div>
 
       <p className="text-[0.62rem] leading-relaxed text-mist-600">
-        Your competitors see these three targets and nothing else about your body — no
-        height, weight, age or BMI. That is what makes scoring across different bodies
-        fair without handing anyone your measurements.
+        Your weight plan and everything you type here stay private. A competitor&apos;s
+        screen gets only the daily aims that result, because it scores your day against
+        them — never your height, weight, age, BMI, resting burn or goals.
       </p>
     </div>
   );

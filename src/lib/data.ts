@@ -46,8 +46,16 @@ export interface Arena {
   players: PlayerView[];
   days: string[];
   today: string;
-  /** This month's goals for everyone visible. */
+  /**
+   * My own goals this month, and nobody else's. A rival's goals stopped being
+   * readable in v11; what they do to that rival's targets is on their card.
+   */
   goals: MonthlyGoal[];
+  /**
+   * People in a running challenge anywhere in the app, not only in mine.
+   * Null against a database that predates v11.
+   */
+  playersEnrolled: number | null;
   /** My own entries for today, so the dashboard needs no follow-up query. */
   todayFood: FoodLog[];
   todayWorkouts: WorkoutLog[];
@@ -188,6 +196,8 @@ interface ArenaPayload {
   food_items: Record<string, unknown>[];
   my_weigh_ins: Record<string, unknown>[];
   my_challenges: ChallengeSummary[];
+  /** Absent before v11. */
+  players_enrolled?: number | null;
 }
 
 export class SchemaOutOfDateError extends Error {
@@ -261,7 +271,11 @@ export async function loadArena(options: ArenaOptions = {}): Promise<Arena | nul
   // My own targets come from my own profile, always freshly derived. A rival's
   // come from the card they published, because their body is not mine to see.
   const myTargets = deriveTargets(me, today);
-  keepPublishedTargetsFresh(supabase, me, myTargets ? publishedTargets(me, today) : null);
+  // Filtered even though get_arena returns only mine from v11: a database
+  // still on v10 returns everyone's, and a rival's goals must not reach a
+  // screen whichever schema is live.
+  const myGoals = (payload.goals ?? []).filter((g) => g.user_id === me.id);
+  keepPublishedTargetsFresh(supabase, me, myTargets ? publishedTargets(me, today, myGoals) : null);
 
   const byUser = new Map<string, Map<string, DailyTotals>>();
   players.forEach((p) => byUser.set(p.id, new Map()));
@@ -272,18 +286,13 @@ export async function loadArena(options: ArenaOptions = {}): Promise<Arena | nul
   // bodies — see the mode note in src/lib/scoring.ts.
   const drafts = players.map((card) => {
     const isMe = card.id === me.id;
-    const base = isMe ? myTargets : cardTargets(card);
-    // A stated goal outranks the formula: if they have said they want 150 g
-    // of protein a day, that is what they should be scored against.
-    const theirGoals = (payload.goals ?? []).filter((g) => g.user_id === card.id);
-    const targets = scoreTargetsFrom(
-      base,
-      theirGoals,
-      daysThisMonth,
-      isMe
-        ? { sex: me.sex, weightKg: me.weight_kg }
-        : { published: card.target_micros },
-    );
+    // A stated goal outranks the formula: if I have said I want 150 g of
+    // protein a day, that is what I am scored against. Mine are applied here.
+    // A rival's arrive already folded into their card, because their goals
+    // themselves are not readable from this side (v11).
+    const targets = isMe
+      ? scoreTargetsFrom(myTargets, myGoals, daysThisMonth, { sex: me.sex, weightKg: me.weight_kg })
+      : scoreTargetsFrom(cardTargets(card), [], daysThisMonth, { published: card.target_micros });
 
     const mine = byUser.get(card.id) ?? new Map<string, DailyTotals>();
     const loggedDates = new Set(
@@ -363,12 +372,13 @@ export async function loadArena(options: ArenaOptions = {}): Promise<Arena | nul
     players: scored,
     days,
     today,
-    goals: payload.goals ?? [],
+    goals: myGoals,
     todayFood: payload.today_food ?? [],
     todayWorkouts: payload.today_workouts ?? [],
     foodItems: coerceItems(payload.food_items ?? []),
     myWeighIns: coerceWeighIns(payload.my_weigh_ins ?? []),
     myChallenges: payload.my_challenges ?? [],
+    playersEnrolled: payload.players_enrolled == null ? null : num(payload.players_enrolled),
   };
 }
 
@@ -377,6 +387,9 @@ export async function loadArena(options: ArenaOptions = {}): Promise<Arena | nul
  *
  * The writers (onboarding, the targets editor, a weigh-in) all publish as
  * they save, so this normally finds nothing to do and costs one comparison.
+ * Adding or removing a monthly goal is the one change that leans on it: the
+ * Goals board refreshes the page as it saves, and this republishes the card
+ * with the goal folded in on that very load.
  * It exists because a rival scores my days from these three numbers: if a
  * write path is ever missed, their scoreboard quietly drifts from mine, and
  * a self-healing read is a much better answer than a discrepancy nobody can

@@ -124,7 +124,7 @@ showing up).
 
 ### Your numbers, your call
 
-Every target the formulas produce can be overridden by hand on the **Me** tab,
+Every target the formulas produce can be overridden by hand on the **Goals** tab,
 and a blank field hands the number straight back to the formula — there is no
 reset to hunt for:
 
@@ -182,7 +182,7 @@ last glass back.
 The aim is **33 ml per kg of bodyweight**, plus **a litre for every 700 kcal you
 burn training** — keyed on burn rather than minutes because burn already carries
 your weight and the intensity, so an hour is not an hour here either. Set your
-own figure on the Me tab and it is used exactly as typed, training day or not:
+own figure on the Goals tab and it is used exactly as typed, training day or not:
 someone who has decided should not have half a litre quietly added on top.
 
 Progress is paced against the clock, not just the total. Two litres by nine in
@@ -207,22 +207,32 @@ a red banner.
 
 ## What your rivals can see
 
-Your name and your emoji. The three daily targets your score is measured
-against. Your food, your training and your daily score, which is the whole point
-of the challenge.
+Your name and your emoji. The daily aims your score is measured against, with
+any monthly goal already applied. Your food, your training and your daily score,
+which is the whole point of the challenge.
 
-Not your height, weight, age, sex, BMI, BMR or weigh-ins.
+Not your height, weight, age, sex, BMI, BMR, activity level, weigh-ins, weight
+plan, monthly goals or the coach's notes. Nothing on the **Goals** tab is theirs
+to see.
 
 This is enforced in the database, not in the UI. The browser holds an anon key
 and can run its own queries, so a number left out of a React component is not
 hidden at all — the fix has to be that the row never leaves Postgres:
 
 - `profiles` is readable only by its owner. The policy that let challenge-mates
-  read it is gone, as is the one on `weigh_ins`.
+  read it is gone, as are the ones on `weigh_ins`, `monthly_goals` and
+  `daily_advice`.
 - Everything the app needs about someone else comes through **`player_cards`**, a
-  view exposing exactly seven columns and gated by the same `can_see()`
-  hub-and-spoke rule as everything else.
-- `get_arena()` returns your own profile in full and everyone else as a card.
+  view gated by the same `can_see()` hub-and-spoke rule as everything else.
+- `get_arena()` returns your own profile and goals in full, and everyone else as
+  a card.
+- A goal still changes what you are scored against, so `publishedTargets()` folds
+  it into your card before writing it. A rival scores your day against a 150 g
+  protein aim without ever reading the goal that set it.
+
+The one figure that crosses challenges is the count at the top of **Versus**: how
+many people are in a running challenge anywhere. It comes from a `security
+definer` function that returns a single integer, never a row.
 
 Publishing the *targets* but not the *body* is a deliberate line. Relative
 scoring is meaningless without the targets, and they are already implied by the

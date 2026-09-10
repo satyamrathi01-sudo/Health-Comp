@@ -1,55 +1,69 @@
-import { latestWeight, requireArena, rival } from "@/lib/data";
-import { EmptyState, PageHeader, Section } from "@/components/ui";
+import { latestWeight, mine, requireArena } from "@/lib/data";
+import { applyGoalsToTargets, bmiBand, daysInMonthOf } from "@/lib/calc";
+import { goalProgress } from "@/lib/goals";
+import { DataRow, PageHeader, Section } from "@/components/ui";
+import Disclosure from "@/components/Disclosure";
 import GoalsBoard, { type GoalSuggestion } from "@/components/GoalsBoard";
-import ChallengeSwitcher from "@/components/ChallengeSwitcher";
-import { GOAL_UNITS, goalProgress } from "@/lib/goals";
-import { daysInMonthOf } from "@/lib/calc";
+import TargetKpis from "@/components/TargetKpis";
+import TargetsEditor from "@/components/TargetsEditor";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Goals · FitClash" };
 
+const BMI_WORD = {
+  under: "below the healthy range",
+  healthy: "in the healthy range",
+  over: "above the healthy range",
+  obese: "well above the healthy range",
+} as const;
+
+/**
+ * What you are measured against, and what you said you wanted. Yours alone.
+ *
+ * This tab used to set your month beside your rival's. The rival half is gone
+ * and the targets moved in from Me: the numbers the score judges you on and
+ * the goals that move those numbers are one subject, and none of it is a
+ * competitor's business. v11 in schema.sql is where that is enforced — hiding
+ * it here alone would hide nothing.
+ *
+ * No challenge switcher either. Nothing on this screen changes with the
+ * challenge you are looking at, and a control that changes nothing you can
+ * see is worse than no control at all.
+ */
 export default async function GoalsPage() {
   const arena = await requireArena({ days: 31 });
-
-  const them = rival(arena);
+  const me = mine(arena);
+  const goals = arena.goals;
 
   // Calendar month, not a rolling window — "what I want to achieve this month".
   const monthStart = arena.today.slice(0, 8) + "01";
   const monthDays = arena.days.filter((d) => d >= monthStart);
-  const goals = arena.goals;
+  const monthTotals = monthDays
+    .map((d) => me.totals.get(d))
+    .filter((t): t is NonNullable<typeof t> => Boolean(t));
+  const monthScores = monthDays
+    .map((d) => me.scores.get(d))
+    .filter((s) => s?.logged)
+    .map((s) => s!.total);
 
   const progressByGoal: Record<string, number | null> = {};
   for (const goal of goals) {
-    const player = arena.players.find((p) => p.profile.id === goal.user_id);
-    if (!player) continue;
-    const totals = monthDays
-      .map((d) => player.totals.get(d))
-      .filter((t): t is NonNullable<typeof t> => Boolean(t));
-    const scores = monthDays
-      .map((d) => player.scores.get(d))
-      .filter((s) => s?.logged)
-      .map((s) => s!.total);
     progressByGoal[goal.id] = goalProgress({
       metric: goal.metric,
-      totals,
-      scores,
-      // Only ever my own: weigh-ins are not readable across a challenge, so a
-      // rival's weight goal shows its target and no reading against it.
-      latestWeight: goal.user_id === arena.me.id ? latestWeight(arena) : null,
+      totals: monthTotals,
+      scores: monthScores,
+      latestWeight: latestWeight(arena),
     });
   }
 
-  const monthLabel = new Date(monthStart + "T00:00:00").toLocaleDateString("en-GB", {
-    month: "long", year: "numeric",
-  });
-
-  const myGoals = goals.filter((g) => g.user_id === arena.me.id);
-  const theirGoals = them ? goals.filter((g) => g.user_id === them.profile.id) : [];
+  // The body's targets, then whatever a goal overrides: exactly what the score
+  // applies, so nothing on this screen can disagree with a scored line.
+  const base = arena.myTargets;
+  const daysThisMonth = daysInMonthOf(arena.today);
+  const targets = base ? applyGoalsToTargets(base, goals, daysThisMonth) : null;
 
   // Anchored to their own numbers, so a suggestion is a real stretch rather
   // than a round number pulled out of the air.
-  const base = arena.myTargets;
-  const daysThisMonth = daysInMonthOf(arena.today);
   const suggestions: GoalSuggestion[] = base
     ? [
         {
@@ -82,55 +96,75 @@ export default async function GoalsPage() {
       ]
     : [];
 
-  return (
-    <div className="rise space-y-6">
-      <PageHeader title="Goals" subtitle={monthLabel} />
+  const sleepNights = [...me.totals.values()].filter((t) => t.sleep_hours != null);
+  const avgSleep = sleepNights.length
+    ? Math.round((sleepNights.reduce((a, t) => a + Number(t.sleep_hours), 0) / sleepNights.length) * 10) / 10
+    : null;
 
-      {arena.myChallenges.length > 1 && (
-        <ChallengeSwitcher challenges={arena.myChallenges} activeId={arena.challenge?.id ?? null} />
+  return (
+    <div className="rise space-y-8">
+      <PageHeader title="Goals" subtitle="What your score is measured against" />
+
+      {/* ---------- the numbers, at a glance ---------- */}
+      {targets && <TargetKpis targets={targets} profile={arena.me} />}
+
+      {/* ---------- change them ---------- */}
+      <Section title="Targets">
+        <TargetsEditor profile={arena.me} today={arena.today} goals={goals} />
+      </Section>
+
+      {targets && (
+        <section className="surface px-5">
+          <Disclosure label="Reference numbers">
+            <div className="pb-2">
+              <DataRow label="Carbs" value={`${targets.carbsTarget} g`}
+                sub={arena.me.carbs_target_g
+                  ? "you set this by hand"
+                  : "what is left after protein and fat"} />
+              <div className="hair" />
+              <DataRow label="Fat" value={`${targets.fatTarget} g`}
+                sub={arena.me.fat_target_g
+                  ? "you set this by hand"
+                  : `${Math.round((targets.fatTarget * 9 / targets.kcalTarget) * 100)}% of your calories, for ${arena.me.goal}`} />
+              <div className="hair" />
+              <DataRow label="Fibre" value={`${targets.fiberTarget} g`}
+                sub={arena.me.fiber_target_g ? "you set this by hand" : "14 g per 1,000 kcal you eat"} />
+              {targets.bmi !== null && (<>
+                <div className="hair" />
+                <DataRow label="BMI" value={String(targets.bmi)} sub={BMI_WORD[bmiBand(targets.bmi)]} />
+              </>)}
+              {avgSleep !== null && (<>
+                <div className="hair" />
+                <DataRow label="Average sleep" value={`${avgSleep} h`} sub="across the nights you logged" />
+              </>)}
+              <p className="hair pt-3 text-[0.65rem] leading-relaxed text-mist-600">
+                Every one of these follows from your body and your goal — the macro split
+                divides <em>your</em> calorie target, and the micronutrient figures on Today
+                scale with your weight, what you eat and what you burn. Nothing here is a
+                generic adult&apos;s number.
+              </p>
+            </div>
+          </Disclosure>
+        </section>
       )}
 
+      {/* ---------- what you said you wanted ---------- */}
       <GoalsBoard
         userId={arena.me.id}
         month={monthStart}
-        goals={myGoals}
+        goals={goals}
         progress={progressByGoal}
         suggestions={suggestions}
       />
 
-      {them && (
-        <Section title={`${them.profile.display_name.split(" ")[0]}'s month`}>
-          {theirGoals.length === 0 ? (
-            <EmptyState icon="○" title="They haven't set any goals yet" />
-          ) : (
-            <div className="surface px-5">
-              {theirGoals.map((g, i) => (
-                <div key={g.id} className={`flex items-center gap-3 py-3.5 ${i > 0 ? "hair" : ""}`}>
-                  <span className="text-xs text-mist-600" aria-hidden="true">
-                    {g.done ? "✓" : "○"}
-                  </span>
-                  <span className="min-w-0 flex-1">
-                    <span className={`block truncate text-sm ${g.done ? "text-mist-600 line-through" : "text-mist-200"}`}>
-                      {g.title}
-                    </span>
-                    {g.target_value !== null && (
-                      <span className="tnum mt-0.5 block text-[0.68rem] text-mist-600">
-                        {g.metric === "weight_kg" ? (
-                          <>target {g.target_value} kg · progress private</>
-                        ) : (
-                          <>
-                            {progressByGoal[g.id] ?? "—"} / {g.target_value} {GOAL_UNITS[g.metric]}
-                          </>
-                        )}
-                      </span>
-                    )}
-                  </span>
-                </div>
-              ))}
-            </div>
-          )}
-        </Section>
-      )}
+      <p className="px-1 text-[0.62rem] leading-relaxed text-mist-600">
+        Nobody you compete against can see any of this. Your resting burn, activity
+        level, weight plan, macro split and monthly goals stay in your account — the
+        database will not hand them to anyone else. A rival&apos;s screen gets only the
+        daily aims your score is measured on, already adjusted for your goals, because
+        it cannot score your day without them. That is also why a bigger body has to
+        do more to earn the same points.
+      </p>
     </div>
   );
 }

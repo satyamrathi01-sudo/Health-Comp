@@ -1513,3 +1513,225 @@ end;
 $$;
 
 grant execute on function public.get_day_detail(uuid, date) to authenticated;
+
+-- =====================================================================
+-- v11 — what you are aiming for is nobody else's business.
+--
+-- The Goals tab now holds everything the score measures you against:
+-- resting burn, activity level, the weight plan, every daily aim and this
+-- month's goals. Two pieces of that were still readable by the people you
+-- compete against, even though no screen showed them any more:
+--
+--   * monthly_goals kept its mates-read policy, so a challenge-mate could
+--     list your goals — "Reach 72 kg" included, which is a body measurement
+--     under another name.
+--   * daily_advice kept one too, and the coach writes from a briefing that
+--     quotes your weight, your plan and those goals.
+--
+-- Both policies go. The one thing a goal does that a rival genuinely needs
+-- is its effect on your targets: a 150 g protein goal IS a 150 g protein
+-- target, and they cannot score your day without it. So the app now folds
+-- goals into the published card before writing it (publishedTargets() in
+-- calc.ts), and rivals are scored from the card alone. The card gains no
+-- columns and says nothing the scoreboard did not already — "96 / 150 g"
+-- was always on it — while the goal, its title and any weight in it stay
+-- behind.
+--
+-- A card published before this release has no goals folded in. It corrects
+-- itself on that player's next page load, the way a drifted card always
+-- has; until then their goal counts on their own screen and not on yours.
+-- =====================================================================
+
+drop policy if exists monthly_goals_mates_read on public.monthly_goals;
+drop policy if exists daily_advice_mates_read on public.daily_advice;
+
+-- ---------------------------------------------------------------------
+-- players_in_challenges(on_date) — how many people are in a running
+-- challenge anywhere in the app, for the count at the top of Versus.
+--
+-- security definer because it has to count past hub and spoke: under
+-- members_read you only see people you share a challenge with, which would
+-- make this "how many people can I see" — a number the switcher already
+-- shows. It returns one integer and never a row, so nothing about who those
+-- people are, or which challenge holds them, crosses the line.
+--
+-- Running means not yet ended on the caller's own today. A challenge that
+-- finished in June is history, not participation.
+--
+-- Signed-in users only. Postgres lets PUBLIC execute a new function and
+-- Supabase grants anon the same by default, so both are taken back.
+-- ---------------------------------------------------------------------
+create or replace function public.players_in_challenges(on_date date)
+returns integer
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select count(distinct m.user_id)::integer
+    from challenge_members m
+    join challenges c on c.id = m.challenge_id
+   where c.end_date >= on_date;
+$$;
+
+revoke execute on function public.players_in_challenges(date) from public, anon;
+grant execute on function public.players_in_challenges(date) to authenticated;
+
+-- ---------------------------------------------------------------------
+-- get_arena v11
+--
+-- Same three arguments as v8, so no caller changes and a build from before
+-- this release keeps working against it. Two differences in what comes back:
+--   * goals are mine only. RLS enforces that on its own now the mates policy
+--     is gone; the filter says so here as well, so the shape of the payload
+--     does not hinge on a policy somewhere else in this file.
+--   * players_enrolled, the headcount above, resolved against my today.
+-- ---------------------------------------------------------------------
+create or replace function public.get_arena(
+  days integer,
+  challenge_id uuid,
+  food_days integer
+)
+returns jsonb
+language plpgsql
+stable
+security invoker
+set search_path = public
+as $$
+declare
+  uid        uuid := auth.uid();
+  me_row     public.profiles;
+  ch         public.challenges;
+  member_ids uuid[];
+  today      date;
+  from_date  date;
+  food_from  date;
+  wanted     uuid;
+begin
+  if uid is null then
+    return null;
+  end if;
+
+  select * into me_row from public.profiles where id = uid;
+  if not found then
+    return null;
+  end if;
+
+  today     := (now() at time zone coalesce(me_row.timezone, 'Asia/Kolkata'))::date;
+  from_date := today - (greatest(coalesce(days, 30), 1) - 1);
+  food_from := today - (greatest(coalesce(food_days, 0), 1) - 1);
+
+  wanted := coalesce(challenge_id, me_row.active_challenge_id);
+
+  if wanted is not null then
+    select c.* into ch
+    from public.challenge_members m
+    join public.challenges c on c.id = m.challenge_id
+    where m.user_id = uid and c.id = wanted;
+  end if;
+
+  if ch.id is null then
+    select c.* into ch
+    from public.challenge_members m
+    join public.challenges c on c.id = m.challenge_id
+    where m.user_id = uid
+    order by m.joined_at desc
+    limit 1;
+  end if;
+
+  -- RLS on challenge_members already narrows this to people I may see.
+  if ch.id is not null then
+    select array_agg(m.user_id) into member_ids
+      from public.challenge_members m
+     where m.challenge_id = ch.id;
+  end if;
+
+  if member_ids is null then
+    member_ids := array[uid];
+  end if;
+
+  return jsonb_build_object(
+    'today',     today,
+    'from_date', from_date,
+    -- My own row, in full. Nobody else's ever appears here.
+    'me',        to_jsonb(me_row),
+    'challenge', case when ch.id is null then null else to_jsonb(ch) end,
+    'players',   coalesce(
+                   (select jsonb_agg(to_jsonb(c) order by c.created_at)
+                      from public.player_cards c
+                     where c.id = any(member_ids)), '[]'::jsonb),
+    'totals',    coalesce(
+                   (select jsonb_agg(to_jsonb(t))
+                      from public.daily_totals t
+                     where t.user_id = any(member_ids)
+                       and t.local_date between from_date and today), '[]'::jsonb),
+    -- Mine only. What a rival's goals do to their targets is already on
+    -- their card; the goals themselves do not leave their account.
+    'goals',     coalesce(
+                   (select jsonb_agg(to_jsonb(g))
+                      from public.monthly_goals g
+                     where g.user_id = uid
+                       and g.month = date_trunc('month', today)::date), '[]'::jsonb),
+    'today_food', coalesce(
+                   (select jsonb_agg(to_jsonb(f) order by f.logged_at)
+                      from public.food_logs f
+                     where f.user_id = uid and f.local_date = today), '[]'::jsonb),
+    'today_workouts', coalesce(
+                   (select jsonb_agg(to_jsonb(w) order by w.logged_at)
+                      from public.workout_logs w
+                     where w.user_id = uid and w.local_date = today), '[]'::jsonb),
+    'my_weigh_ins', coalesce(
+                   (select jsonb_agg(jsonb_build_object(
+                             'local_date', w.local_date,
+                             'weight_kg',  w.weight_kg) order by w.local_date desc)
+                      from (select local_date, weight_kg
+                              from public.weigh_ins
+                             where user_id = uid
+                             order by local_date desc
+                             limit 60) w), '[]'::jsonb),
+    'my_challenges', coalesce(
+                   (select jsonb_agg(jsonb_build_object(
+                              'id',           c.id,
+                              'name',         c.name,
+                              'invite_code',  c.invite_code,
+                              'start_date',   c.start_date,
+                              'end_date',     c.end_date,
+                              'created_by',   c.created_by,
+                              'is_mine',      c.created_by = uid,
+                              'owner_name',   coalesce(op.display_name, 'Someone'),
+                              'owner_emoji',  coalesce(op.avatar_emoji, '🔥'),
+                              'member_count', (select count(*) from public.challenge_members mm
+                                                where mm.challenge_id = c.id)
+                            ) order by m2.joined_at desc)
+                      from public.challenge_members m2
+                      join public.challenges c on c.id = m2.challenge_id
+                      left join public.player_cards op on op.id = c.created_by
+                     where m2.user_id = uid), '[]'::jsonb),
+    'food_items', case when coalesce(food_days, 0) <= 0 then '[]'::jsonb else coalesce(
+                   (select jsonb_agg(jsonb_build_object(
+                             'user_id',   x.user_id,
+                             'date',      x.local_date,
+                             'name',      x.name,
+                             'protein_g', x.protein_g,
+                             'kcal',      x.kcal))
+                      from (
+                        select f.user_id,
+                               f.local_date,
+                               min(btrim(it ->> 'name'))                     as name,
+                               round(sum(public.jnum(it, 'protein_g')), 1)   as protein_g,
+                               round(sum(public.jnum(it, 'kcal')))           as kcal
+                          from public.food_logs f
+                          cross join lateral jsonb_array_elements(f.items) as it
+                         where f.user_id = any(member_ids)
+                           and f.local_date between food_from and today
+                           and btrim(coalesce(it ->> 'name', '')) <> ''
+                         group by f.user_id, f.local_date, lower(btrim(it ->> 'name'))
+                      ) x), '[]'::jsonb) end,
+    -- Everyone in a running challenge anywhere, not just this one. A count,
+    -- never a list — see players_in_challenges above.
+    'players_enrolled', public.players_in_challenges(today)
+  );
+end;
+$$;
+
+grant execute on function public.get_arena(integer, uuid, integer) to authenticated;

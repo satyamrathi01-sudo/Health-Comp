@@ -32,8 +32,8 @@ const YOU = "var(--color-lime-glow)";
  *
  * The challenge switcher went with them. Nothing here depends on which
  * challenge you are looking at any more, and a control that changes nothing
- * you can see is worse than no control at all. It lives on Versus and Goals,
- * where switching actually changes the screen.
+ * you can see is worse than no control at all. It lives on Versus, where
+ * switching actually changes the screen.
  */
 export default async function TodayPage() {
   const arena = await requireArena({ days: 30 });
@@ -126,7 +126,7 @@ export default async function TodayPage() {
           title={pace.hasPlan ? "Your plan" : "Last two weeks"}
           action={
             !pace.hasPlan ? (
-              <Link href="/me" className="text-xs font-semibold text-lime-glow">Set a target</Link>
+              <Link href="/goals" className="text-xs font-semibold text-lime-glow">Set a target</Link>
             ) : undefined
           }
         >

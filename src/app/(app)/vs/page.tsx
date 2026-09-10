@@ -35,7 +35,11 @@ export default async function VersusPage({
   if (!them) {
     return (
       <div className="rise">
-        <PageHeader title="Versus" subtitle="Nobody to beat yet" />
+        <PageHeader
+          title="Versus"
+          subtitle="Nobody to beat yet"
+          right={<PlayingCount count={arena.playersEnrolled} />}
+        />
         {arena.myChallenges.length > 1 && (
           <div className="mb-6">
             <ChallengeSwitcher challenges={arena.myChallenges} activeId={arena.challenge?.id ?? null} />
@@ -84,7 +88,11 @@ export default async function VersusPage({
 
   return (
     <div className="rise space-y-8">
-      <PageHeader title="Versus" subtitle={subtitle} />
+      <PageHeader
+        title="Versus"
+        subtitle={subtitle}
+        right={<PlayingCount count={arena.playersEnrolled} />}
+      />
 
       {arena.myChallenges.length > 1 && (
         <ChallengeSwitcher challenges={arena.myChallenges} activeId={arena.challenge?.id ?? null} />
@@ -242,6 +250,33 @@ function Side({
       {player.streak > 0 && (
         <div className="tnum mt-0.5 text-[0.65rem] text-gold">🔥 {player.streak}</div>
       )}
+    </div>
+  );
+}
+
+/**
+ * Everyone in a running challenge anywhere in the app — not just this one.
+ *
+ * A bare count on purpose. It comes from a definer function that returns a
+ * single integer (players_in_challenges in schema.sql), so it says how busy
+ * the place is without saying who is in it. Hub and spoke still decides
+ * every name on the rest of this screen.
+ */
+function PlayingCount({ count }: { count: number | null }) {
+  // Null until schema.sql v11 has been run; there is nothing honest to show.
+  if (count === null) return null;
+  return (
+    <div
+      className="flex shrink-0 items-center gap-1.5 rounded-full border border-hair px-3 py-1.5"
+      title="People in a running challenge anywhere on FitClash"
+    >
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+        strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"
+        className="shrink-0 text-mist-600" aria-hidden="true">
+        <path d="M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8ZM2 21a7 7 0 0 1 14 0M16 3.1a4 4 0 0 1 0 7.8M22 21a7 7 0 0 0-4-6.3" />
+      </svg>
+      <span className="tnum text-sm font-bold text-white">{count.toLocaleString("en-GB")}</span>
+      <span className="text-[0.62rem] text-mist-600">in challenges</span>
     </div>
   );
 }

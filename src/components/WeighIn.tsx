@@ -3,16 +3,18 @@
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { createClient } from "@/lib/supabase/client";
-import { publishedTargets } from "@/lib/calc";
+import { publishedTargets, type GoalLike } from "@/lib/calc";
 import type { Profile } from "@/lib/types";
 
 export default function WeighIn({
-  userId, today, profile, current, delta,
+  userId, today, profile, goals, current, delta,
 }: {
   userId: string;
   today: string;
   /** Needed to republish the targets that move with bodyweight. */
   profile: Profile;
+  /** This month's goals, which every published card has folded in. */
+  goals: GoalLike[];
   current: number;
   delta: number | null;
 }) {
@@ -32,12 +34,12 @@ export default function WeighIn({
 
     // Protein scales per kg and BMR moves with weight, so the published
     // targets move too. Recomputed here rather than left to drift: a rival
-    // scores my days from those three numbers, and the next page load would
+    // scores my days from those numbers, and the next page load would
     // otherwise be scoring me against yesterday's body.
     const next: Profile = { ...profile, weight_kg: weight };
     await supabase
       .from("profiles")
-      .update({ weight_kg: weight, ...publishedTargets(next, today) })
+      .update({ weight_kg: weight, ...publishedTargets(next, today, goals) })
       .eq("id", userId);
 
     setBusy(false);

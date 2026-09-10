@@ -2,7 +2,7 @@ import type { ActivityLevel, Exercise, Goal, PlayerCard, Profile, Sex } from "./
 import type { ScoreTargets } from "./scoring.ts";
 
 /** Multipliers applied to BMR to get maintenance calories. */
-const ACTIVITY_FACTOR: Record<ActivityLevel, number> = {
+export const ACTIVITY_FACTOR: Record<ActivityLevel, number> = {
   sedentary: 1.2,
   light: 1.375,
   moderate: 1.55,
@@ -382,12 +382,18 @@ export function deriveTargets(p: Profile, today?: string): DerivedTargets | null
 }
 
 /**
- * The three numbers a rival is allowed to see, ready to write to the
- * profile's published columns.
+ * The numbers a rival is allowed to see, ready to write to the profile's
+ * published columns.
  *
  * Keeping this next to deriveTargets is the point: the formula exists once,
  * in TypeScript, and the database stores its output rather than reimplementing
  * it. See the v8 note in supabase/schema.sql.
+ *
+ * Monthly goals are folded in before anything is published. A rival can no
+ * longer read your goals (v11), but they still score your day against what
+ * those goals set, so the card carries a goal's effect and never the goal.
+ * Every writer must pass the same goals the score applies, or the card and
+ * your own screen will disagree until the next page load republishes it.
  */
 export interface PublishedTargets {
   target_kcal: number | null;
@@ -397,15 +403,21 @@ export interface PublishedTargets {
   target_micros: Record<string, number> | null;
 }
 
-export function publishedTargets(p: Profile, today?: string): PublishedTargets {
-  const t = deriveTargets(p, today);
-  if (!t) {
+export function publishedTargets(
+  p: Profile,
+  today?: string,
+  goals: GoalLike[] = [],
+): PublishedTargets {
+  const day = today ?? localDate(p.timezone);
+  const derived = deriveTargets(p, day);
+  if (!derived) {
     return {
       target_kcal: null, target_protein_g: null,
       target_burn_kcal: null, target_active_minutes: null,
       target_micros: null,
     };
   }
+  const t = applyGoalsToTargets(derived, goals, daysInMonthOf(day));
   return {
     target_kcal: t.kcalTarget,
     target_protein_g: t.proteinTarget,
