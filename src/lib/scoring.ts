@@ -59,13 +59,18 @@ export const SCORING = {
   },
 
   /**
-   * Going past an aim — burn, protein, active minutes and fibre.
+   * Going past a nutrition aim — protein, fibre, and the vitamin and mineral
+   * aims.
    *
    * Reaching the target is full marks, and so is beating it by up to half
-   * again: a big training day or a protein-heavy lunch should never cost
-   * points. Past that the line falls to nothing at double the target, so no
-   * single line can be farmed with 300 g of protein or a three-hour session.
-   * Ceilings (sugar, saturated fat) work the other way round; see `limits`.
+   * again: a protein-heavy lunch should never cost points. Past that the line
+   * falls to nothing at double the target, so no line can be farmed with
+   * 300 g of protein. Ceilings (sugar, saturated fat) work the other way
+   * round; see `limits`.
+   *
+   * Burn and active minutes are deliberately NOT here. The app exists to keep
+   * you moving, so training past your target is never marked down — a full
+   * line simply stops earning more.
    */
   overshoot: { freeUpTo: 1.5, zeroAt: 2 },
 
@@ -174,7 +179,7 @@ export interface ScoreLine {
    * True when the line lost points by going too far rather than not far
    * enough — well past an aim, or over the calorie target — so an
    * explanation can say "less" instead of "more". Only on the lines where
-   * going over can cost: burn, protein, calories, fibre and minutes.
+   * going over can cost: protein, calories, fibre, and vitamins and minerals.
    */
   over?: boolean;
 }
@@ -207,8 +212,8 @@ function capped(value: number, per: number, max: number): number {
 }
 
 /**
- * Credit for an aim, 0–1: in proportion up to the target, full from there to
- * `freeUpTo` times it, then down to nothing at `zeroAt` times it.
+ * Credit for a nutrition aim, 0–1: in proportion up to the target, full from
+ * there to `freeUpTo` times it, then down to nothing at `zeroAt` times it.
  *
  * Exported because the protein card on Versus prices protein with it, so the
  * card and the score can never disagree.
@@ -266,10 +271,11 @@ export function scoreDay(
       : null;
 
   /* ---------------- burn ---------------- */
+  // Full at the target and capped there — never marked down past it, because
+  // training more is the point. See the note on `overshoot`.
   const burn = rel
-    ? round1(aimCredit(kcalOut, rel.burnTarget) * SCORING.burn.max)
+    ? round1(Math.min(1, kcalOut / rel.burnTarget) * SCORING.burn.max)
     : capped(kcalOut, SCORING.burn.kcalPerPoint, SCORING.burn.max);
-  const burnOver = rel !== null && pastAim(kcalOut, rel.burnTarget);
 
   /* ---------------- protein ---------------- */
   const protein = rel
@@ -281,12 +287,12 @@ export function scoreDay(
   // Judged against how long YOUR burn target takes at a moderate effort, so
   // an active person chasing 600 kcal is asked for more minutes than a
   // sedentary one chasing 250. Falls back to the flat hour when no target has
-  // been published — an older card, or a half-filled profile.
+  // been published — an older card, or a half-filled profile. Capped like
+  // burn, never marked down: more movement is never worse.
   const minutesTarget = rel?.minutesTarget ?? 0;
   const minutes = minutesTarget > 0
-    ? round1(aimCredit(activeMinutes, minutesTarget) * SCORING.activeMinutes.max)
+    ? round1(Math.min(1, activeMinutes / minutesTarget) * SCORING.activeMinutes.max)
     : capped(activeMinutes, SCORING.activeMinutes.minutesPerPoint, SCORING.activeMinutes.max);
-  const minutesOver = pastAim(activeMinutes, minutesTarget);
 
   /* ---------------- calories ---------------- */
   // Guard: without a food log this would hand out full marks for logging
@@ -347,24 +353,30 @@ export function scoreDay(
   }
 
   /* ---------------- micronutrients ---------------- */
-  // Scored on the mean shortfall rather than a count of aims hit, so missing
-  // one nutrient badly reads differently from missing three narrowly. The
-  // detail line still reports the count, which is what a person can act on.
+  // Scored on the mean credit rather than a count of aims hit, so missing
+  // one nutrient badly reads differently from missing three narrowly. Each
+  // aim follows the same rule as protein: full up to half again past it,
+  // nothing at double. The detail still reports the counts, which are what a
+  // person can act on.
   const microAims = rel?.microAims ?? [];
   let microPoints = 0;
   let microDetail = "no food logged";
+  let microOver = false;
 
   if (hasFood && microAims.length > 0) {
     let sum = 0;
     let met = 0;
+    let tooMuch = 0;
     for (const a of microAims) {
       const aim = a.atRest + Math.min(a.maxSweatAdd, Math.max(0, kcalOut) * a.perSweat);
-      const ratio = aim > 0 ? field(t, a.key) / aim : 0;
-      sum += Math.min(1, ratio);
-      if (ratio >= 1) met++;
+      const value = field(t, a.key);
+      sum += aimCredit(value, aim);
+      if (pastAim(value, aim)) tooMuch++;
+      else if (aim > 0 && value >= aim) met++;
     }
     microPoints = round1((sum / microAims.length) * SCORING.micros.max);
-    microDetail = `${met} of ${microAims.length} aims met`;
+    microDetail = `${met} of ${microAims.length} aims met${tooMuch ? ` · ${tooMuch} way over` : ""}`;
+    microOver = tooMuch > 0;
   }
 
   /* ---------------- showing up ---------------- */
@@ -379,11 +391,10 @@ export function scoreDay(
       key: "burn",
       label: "Calories burned",
       detail: rel
-        ? `${Math.round(kcalOut)} / ${rel.burnTarget} kcal${wayOver(burnOver)}`
+        ? `${Math.round(kcalOut)} / ${rel.burnTarget} kcal`
         : `${Math.round(kcalOut)} kcal`,
       points: burn,
       max: SCORING.burn.max,
-      over: burnOver,
     },
     {
       key: "protein",
@@ -426,16 +437,16 @@ export function scoreDay(
       detail: microAims.length > 0 ? microDetail : "no targets yet",
       points: microPoints,
       max: microAims.length > 0 ? SCORING.micros.max : 0,
+      over: microOver,
     },
     {
       key: "minutes",
       label: "Active minutes",
       detail: minutesTarget > 0
-        ? `${Math.round(activeMinutes)} / ${minutesTarget} min${wayOver(minutesOver)}`
+        ? `${Math.round(activeMinutes)} / ${minutesTarget} min`
         : `${Math.round(activeMinutes)} min`,
       points: minutes,
       max: SCORING.activeMinutes.max,
-      over: minutesOver,
     },
     {
       key: "logging",
@@ -541,7 +552,8 @@ const KCAL_PER_WALK_MIN = 5.3;
  *
  * `over` says which way. A line lost by going too far is won back by doing
  * LESS, at the rate the line falls past its free zone — not by the "more"
- * the same number of points would take from below.
+ * the same number of points would take from below. Burn and minutes never
+ * lose points that way, so their hints only ever ask for more.
  */
 function closeHint(
   key: ScoreLine["key"],
@@ -557,10 +569,6 @@ function closeHint(
 
   switch (key) {
     case "burn": {
-      if (over && targets) {
-        return `${Math.round(p * pastPerPoint(targets.burnTarget, SCORING.burn.max))} kcal less — ` +
-          "training far past your burn target costs points";
-      }
       // In relative mode a point is worth a share of that person's own burn
       // target, so the advice is in their units rather than a global constant.
       const kcalPerPoint = targets
@@ -583,10 +591,6 @@ function closeHint(
       return `${grams} g more protein — roughly ${eggs} eggs, or ${eggs * 100} g of paneer`;
     }
     case "minutes": {
-      if (over && targets?.minutesTarget) {
-        return `${Math.round(p * pastPerPoint(targets.minutesTarget, SCORING.activeMinutes.max))} fewer active ` +
-          "minutes — far past your target costs points";
-      }
       const perPoint = targets?.minutesTarget
         ? targets.minutesTarget / SCORING.activeMinutes.max
         : SCORING.activeMinutes.minutesPerPoint;
@@ -610,7 +614,9 @@ function closeHint(
     case "limits":
       return "keep added sugar and saturated fat under their limits";
     case "micros":
-      return "eat a wider mix of foods — see Vitamins & minerals on Today";
+      return over
+        ? "ease off whatever pushed a vitamin or mineral far past its aim"
+        : "eat a wider mix of foods — see Vitamins & minerals on Today";
     case "logging":
       return "log both food and training — a rest day counts";
     case "streak":
@@ -665,8 +671,8 @@ export function compareScores(mine: DayScore, theirs: DayScore): ScoreGap {
  * Rather than estimating, this re-scores the day with the change applied
  * and takes the difference. That way every cap, guard and band is honoured
  * automatically: adding 300 kcal of burn is worth nothing if you already
- * maxed that line, less than nothing if it takes you far past the target,
- * and the number shown can never contradict the score.
+ * maxed that line, adding protein far past its target is worth less than
+ * nothing, and the number shown can never contradict the score.
  * ===================================================================== */
 
 export type ImpactComponent =

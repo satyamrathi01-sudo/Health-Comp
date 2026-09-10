@@ -64,13 +64,13 @@ daily burn target set at 15% of maintenance.
 
 | Component | Full marks at | Points |
 |---|---|---|
-| Calories burned | your own burn target, up to 1.5× it | 25 |
+| Calories burned | your own burn target — more never costs | 25 |
 | Protein | your own protein target, up to 1.5× it | 25 |
 | Calorie target | within 2% of your aim, over or under | 18 |
-| Active minutes | how long your burn target takes, up to 1.5× it | 10 |
+| Active minutes | how long your burn target takes — more never costs | 10 |
 | Fibre | your fibre aim, up to 1.5× it | 5 |
 | Sugar & sat fat | staying under both ceilings | 4 |
-| Vitamins & minerals | meeting your nine aims | 3 |
+| Vitamins & minerals | your nine aims, up to 1.5× each | 3 |
 | Logged the day | food + training (or rest day) | 10 |
 | **Base** | | **100** |
 | Streak bonus | 10 consecutive days | +10 |
@@ -80,12 +80,15 @@ against a 300 target. That is the point: a 95 kg man maintaining on 2900 kcal
 has to do meaningfully more work than a 55 kg woman on 1700 to earn the same
 score.
 
-**Missing a target costs points, in either direction.**
+**Missing a target costs points in either direction — except training.**
 
-- **Aims** — burn, protein, active minutes and fibre. Falling short costs points
-  in proportion. Beating the target is free up to half again, so a big training
-  day never costs you; past that the line falls to nothing at double the target,
-  so no single line can be farmed.
+- **Training** — burn and active minutes. Falling short costs points in
+  proportion; going past never does. The app exists to keep you moving, so a
+  full line simply stops earning more.
+- **Nutrition aims** — protein, fibre, and the vitamin and mineral aims. Falling
+  short costs points in proportion. Beating the target is free up to half again,
+  so a protein-heavy lunch never costs you; past that the line falls to nothing
+  at double the target, so no line can be farmed.
 - **The calorie target** is stricter, because it is a target rather than an aim:
   full marks within 2% (the food estimates themselves are rough), then a straight
   line down to nothing at 30% off, over or under. 135 kcal over an aim of 2,391

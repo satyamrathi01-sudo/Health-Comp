@@ -182,18 +182,19 @@ check("smaller person burning less still wins the line",
 // Hitting your own target is a full mark regardless of the absolute number.
 check("big hitting 800 maxes burn",
   scoreDay(T({ kcal_out: 800, sessions: 1 }), "d", 0, BIG).lines.find((l) => l.key === "burn")!.points, 25);
-// Beating an aim is free up to half again; past that the line falls to
-// nothing at double, so no single line can be farmed.
+// Training is never marked down for going further: the point is to keep you
+// moving. Falling short still costs.
 const burnAt = (kcal: number) =>
   scoreDay(T({ kcal_out: kcal, sessions: 1 }), "d", 0, SMALL).lines.find((l) => l.key === "burn")!;
-check("half again past the burn target is still full marks", burnAt(450).points, 25);
-check("three-quarters past it scores half the line", burnAt(525).points, 12.5);
-check("double the target scores nothing on the line", burnAt(600).points, 0);
-check("and far past it cannot go below nothing", burnAt(5000).points, 0);
-check("going too far is flagged, so hints say less rather than more", burnAt(525).over, true);
-check("but beating the target inside the free zone is not", burnAt(450).over, false);
+check("half the burn target scores half the line", burnAt(150).points, 12.5);
+check("double the burn target is still full marks", burnAt(600).points, 25);
+check("and far past it never costs points", burnAt(5000).points, 25);
+check("so the burn line is never flagged as too much", burnAt(5000).over, undefined);
+check("active minutes far past their target never cost points either",
+  scoreDay(T({ active_minutes: 200, sessions: 1 }), "d", 0, { ...SMALL, minutesTarget: 45 })
+    .lines.find((l) => l.key === "minutes")!.points, 10);
 
-// Protein scales the same way.
+// Protein is a nutrition aim: short costs, and so does going far past it.
 check("85/170 protein scores half",
   scoreDay(T({ protein_g: 85, meals: 1 }), "d", 0, BIG).lines.find((l) => l.key === "protein")!.points, 12.5);
 check("100/100 protein maxes",
@@ -201,8 +202,22 @@ check("100/100 protein maxes",
 const proteinAt = (g: number) =>
   scoreDay(T({ protein_g: g, meals: 1 }), "d", 0, SMALL).lines.find((l) => l.key === "protein")!;
 check("150 g against a 100 g target is still full marks", proteinAt(150).points, 25);
+check("175 g against it scores half the line", proteinAt(175).points, 12.5);
 check("200 g against it scores nothing on the line", proteinAt(200).points, 0);
 check("and the detail says it went way over", /way over/.test(proteinAt(180).detail), true);
+check("going too far is flagged, so hints say less rather than more", proteinAt(180).over, true);
+check("but beating the target inside the free zone is not", proteinAt(140).over, false);
+
+// Vitamins and minerals follow the protein rule, one nutrient at a time.
+const ironFlood = scoreDay(
+  T({ kcal_in: 2400, protein_g: 200, meals: 4, fiber_g: 40, sugar_g: 10, satfat_g: 5,
+      iron_mg: 38, zinc_mg: 17 }),
+  "2026-09-07", 0, perfectTargets,
+);
+check("double an aim scores nothing for that nutrient",
+  ironFlood.lines.find((l) => l.key === "micros")!.points, 1.5);
+check("and the detail counts it as way over",
+  ironFlood.lines.find((l) => l.key === "micros")!.detail, "1 of 2 aims met · 1 way over");
 
 // Calorie adherence punishes under-eating as well as over-eating.
 const onTarget = scoreDay(T({ kcal_in: 2400, meals: 3 }), "d", 0, BIG).lines.find((l) => l.key === "net")!;
@@ -245,10 +260,10 @@ check("hint uses the small target, not the global constant",
   /200 kcal more/.test(burnGap.toClose ?? ""), true);
 
 // When the trailing side lost the line by going too far, the hint says less.
-const overDoer = scoreDay(T({ kcal_out: 560, sessions: 1 }), "d", 0, SMALL);
-const onPlan   = scoreDay(T({ kcal_out: 300, sessions: 1 }), "d", 0, SMALL);
+const overDoer = scoreDay(T({ protein_g: 180, meals: 1 }), "d", 0, SMALL);
+const onPlan   = scoreDay(T({ protein_g: 100, meals: 1 }), "d", 0, SMALL);
 check("a hint for overdoing it asks for less, not more",
-  /kcal less/.test(compareScores(overDoer, onPlan).lines.find((l) => l.key === "burn")!.toClose ?? ""),
+  /g less protein/.test(compareScores(overDoer, onPlan).lines.find((l) => l.key === "protein")!.toClose ?? ""),
   true);
 
 
@@ -261,13 +276,13 @@ const proteinGain = projectedGain({ component: "protein", amount: 40 }, day, 0, 
 check("adding protein is worth points", proteinGain > 0, true);
 check("40g against a 170g target is ~5.9 pts", proteinGain, 5.9);
 
-// Past the target the maths turns round. A little more is free; far past it,
-// more burn is priced as a loss rather than as nothing.
+// Once a line is full, more burn is worth nothing — never a loss — while
+// protein far past its target is priced as the loss it is.
 const maxed = T({ kcal_out: 900, sessions: 1, meals: 1, protein_g: 200 });
-check("a little more past the burn target costs nothing",
-  projectedGain({ component: "burn", amount: 300 }, maxed, 0, BIG), 0);
-check("far past it, more burn is priced as a loss",
-  projectedGain({ component: "burn", amount: 500 }, maxed, 0, BIG) < 0, true);
+check("more burn past the target costs nothing",
+  projectedGain({ component: "burn", amount: 5000 }, maxed, 0, BIG), 0);
+check("protein far past its target is priced as a loss",
+  projectedGain({ component: "protein", amount: 200 }, maxed, 0, BIG) < 0, true);
 
 // Sleep and micros are tracked but not scored — say zero rather than invent.
 check("sleep is worth 0 points", projectedGain({ component: "sleep", amount: 1 }, day, 0, BIG), 0);
