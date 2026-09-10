@@ -64,10 +64,13 @@ daily burn target set at 15% of maintenance.
 
 | Component | Full marks at | Points |
 |---|---|---|
-| Calories burned | your own burn target | 35 |
-| Protein | your own protein target | 25 |
-| Calorie target | intake within 10% of your aim | 18 |
-| Active minutes | 60 min | 12 |
+| Calories burned | your own burn target, up to 1.5× it | 25 |
+| Protein | your own protein target, up to 1.5× it | 25 |
+| Calorie target | within 2% of your aim, over or under | 18 |
+| Active minutes | how long your burn target takes, up to 1.5× it | 10 |
+| Fibre | your fibre aim, up to 1.5× it | 5 |
+| Sugar & sat fat | staying under both ceilings | 4 |
+| Vitamins & minerals | meeting your nine aims | 3 |
 | Logged the day | food + training (or rest day) | 10 |
 | **Base** | | **100** |
 | Streak bonus | 10 consecutive days | +10 |
@@ -77,15 +80,28 @@ against a 300 target. That is the point: a 95 kg man maintaining on 2900 kcal
 has to do meaningfully more work than a 55 kg woman on 1700 to earn the same
 score.
 
-Active minutes, the logging points and the streak stay absolute — an hour is an
-hour whoever you are, and showing up is showing up.
+**Missing a target costs points, in either direction.**
+
+- **Aims** — burn, protein, active minutes and fibre. Falling short costs points
+  in proportion. Beating the target is free up to half again, so a big training
+  day never costs you; past that the line falls to nothing at double the target,
+  so no single line can be farmed.
+- **The calorie target** is stricter, because it is a target rather than an aim:
+  full marks within 2% (the food estimates themselves are rough), then a straight
+  line down to nothing at 30% off, over or under. 135 kcal over an aim of 2,391
+  scores 15.7 of 18; 3,000 kcal scores 2.9. There are no steps, so one more
+  spoonful costs a sliver rather than a whole band, and there is no floor.
+- **Ceilings** — added sugar and saturated fat. Under is full marks; over falls
+  to nothing at double.
+
+Only logging and the streak stay absolute — showing up is showing up.
 
 Two guards worth knowing about:
 
 - Calories only score once food is logged, otherwise skipping breakfast would
   be worth 18 free points.
-- Intake is scored on *distance from* your target, so under-eating is penalised
-  as well as over-eating.
+- A coach suggestion is priced by re-scoring the day with it applied, so advice
+  to add more of something you are already well past shows up as a loss.
 
 If a profile is too incomplete to derive targets, that player falls back to
 absolute scoring rather than getting no score at all.
@@ -120,9 +136,8 @@ Fat has a floor that calories cannot argue with: below roughly 0.6 g/kg,
 hormones follow. On an aggressive cut that floor, not the share, is what sets
 the number, and carbs absorb the squeeze.
 
-Only two things stay absolute, and both on purpose: **active minutes** (an hour
-is an hour whoever you are) and the **logging and streak points** (showing up is
-showing up).
+Only the **logging and streak points** stay absolute, on purpose: showing up is
+showing up.
 
 ### Your numbers, your call
 

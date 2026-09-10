@@ -289,6 +289,16 @@ check("each side is measured against their own target",
   [Math.round(cmp.minePct * 100), Math.round(cmp.theirsPct * 100)], [12, 27]);
 check("points use the score's own protein weighting", cmp.theirsPoints > cmp.minePoints, true);
 
+// The protein card must price going too far exactly as the score does.
+const flood = compareProtein({
+  mineItems: [{ user_id: "me", date: TODAY, name: "Whey", protein_g: 250, kcal: 1000 }],
+  theirItems: [], mineTarget: 150, theirTarget: 120, theirName: "Riya",
+});
+check("protein well past the target scores the same on the card as on the score",
+  flood.minePoints,
+  scoreDay(T({ protein_g: 250, meals: 1 }), "d", 0, { burnTarget: 400, proteinTarget: 150, kcalTarget: 2200 })
+    .lines.find((l) => l.key === "protein")!.points);
+
 check("the swap trades one of your foods for one of theirs", cmp.swap!.to.name, "Chole");
 check("and it is the low-density food that goes", cmp.swap!.from.name, "Rice");
 check("the swap gains real grams", cmp.swap!.gainG > 0, true);

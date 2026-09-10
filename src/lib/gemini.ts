@@ -523,6 +523,9 @@ Give three to five pointers for TOMORROW. Rules:
   micronutrient pointers use "sleep" or "micros" with amount 0 — the app knows those do
   not move the score and will say so. Water uses "water" with the millilitres to add. Be realistic: the amount is what one ordinary day's
   change would actually deliver.
+- The score rewards landing close to the calorie target from either side, and stops
+  rewarding protein, burn, active minutes and fibre once they pass 1.5 times their targets.
+  Never suggest more of something that is already well past its target; suggest easing off.
 - Tone: direct, warm, no cheerleading, no emoji, no exclamation marks. Address them as
   "you". This is a friendly competition between two friends, not a clinic.
 - This is general fitness guidance, not medical advice. Do not diagnose, do not name

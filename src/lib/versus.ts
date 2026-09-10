@@ -1,4 +1,4 @@
-import { SCORING } from "./scoring.ts";
+import { aimCredit, SCORING } from "./scoring.ts";
 import type { FoodItemRow } from "./types.ts";
 
 /* =====================================================================
@@ -101,7 +101,7 @@ export function foldSources(rows: FoodItemRow[]): Map<string, FoodSource> {
 /** Protein points on the score's own terms, so this can never disagree with it. */
 function proteinPoints(grams: number, target: number): number {
   if (!(target > 0)) return round1(Math.min(SCORING.protein.max, grams / SCORING.protein.gramsPerPoint));
-  return round1(Math.min(1, grams / target) * SCORING.protein.max);
+  return round1(aimCredit(grams, target) * SCORING.protein.max);
 }
 
 export interface ProteinInput {

@@ -134,6 +134,13 @@ export default function AdviceCard({ hasData }: { hasData: boolean }) {
                       </span>{" "}
                       on today&apos;s score
                     </>
+                  ) : p.points < 0 ? (
+                    <>
+                      <span className="font-semibold text-flame">
+                        {p.points} pts
+                      </span>{" "}
+                      — that would take you too far past your target
+                    </>
                   ) : p.component === "sleep" ? (
                     "Not scored, but it helps you recover"
                   ) : p.component === "water" ? (

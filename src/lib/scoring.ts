@@ -45,16 +45,29 @@ export const SCORING = {
     ] as { upTo: number; points: number }[],
     /**
      * Relative mode instead scores how close intake landed to that person's
-     * own calorie target, penalising over- and under-eating alike — a 1200
-     * kcal day is not a win for someone maintaining on 2900.
+     * own calorie target, over and under alike — a 1200 kcal day is not a win
+     * for someone maintaining on 2900, and neither is 3000.
+     *
+     * Full marks only within `fullWithin` of the target, a small allowance
+     * because the food estimates themselves are rough, then a straight line
+     * down to nothing at `zeroAt`. This used to be steps: anything within 10%
+     * scored full, so 135 kcal over an aim of 2,391 lost nothing at all, and a
+     * single spoonful at a band edge could cost five points. A line costs a
+     * little for a little and a lot for a lot, and there is no floor.
      */
-    adherenceBands: [
-      { withinFraction: 0.10, points: 18 },
-      { withinFraction: 0.20, points: 13 },
-      { withinFraction: 0.35, points: 8 },
-    ] as { withinFraction: number; points: number }[],
-    adherenceFloor: 3,
+    adherence: { fullWithin: 0.02, zeroAt: 0.3 },
   },
+
+  /**
+   * Going past an aim — burn, protein, active minutes and fibre.
+   *
+   * Reaching the target is full marks, and so is beating it by up to half
+   * again: a big training day or a protein-heavy lunch should never cost
+   * points. Past that the line falls to nothing at double the target, so no
+   * single line can be farmed with 300 g of protein or a three-hour session.
+   * Ceilings (sugar, saturated fat) work the other way round; see `limits`.
+   */
+  overshoot: { freeUpTo: 1.5, zeroAt: 2 },
 
   /**
    * Against your own fibre aim — 14 g per 1,000 kcal you aim to eat. The
@@ -157,6 +170,13 @@ export interface ScoreLine {
   detail: string;
   points: number;
   max: number;
+  /**
+   * True when the line lost points by going too far rather than not far
+   * enough — well past an aim, or over the calorie target — so an
+   * explanation can say "less" instead of "more". Only on the lines where
+   * going over can cost: burn, protein, calories, fibre and minutes.
+   */
+  over?: boolean;
 }
 
 export interface DayScore {
@@ -186,6 +206,39 @@ function capped(value: number, per: number, max: number): number {
   return Math.min(max, round1(value / per));
 }
 
+/**
+ * Credit for an aim, 0–1: in proportion up to the target, full from there to
+ * `freeUpTo` times it, then down to nothing at `zeroAt` times it.
+ *
+ * Exported because the protein card on Versus prices protein with it, so the
+ * card and the score can never disagree.
+ */
+export function aimCredit(value: number, target: number): number {
+  if (!(target > 0) || !(value > 0)) return 0;
+  const ratio = value / target;
+  if (ratio <= 1) return ratio;
+  const { freeUpTo, zeroAt } = SCORING.overshoot;
+  if (ratio <= freeUpTo) return 1;
+  return Math.max(0, 1 - (ratio - freeUpTo) / (zeroAt - freeUpTo));
+}
+
+/** Whether an aim is far enough past its target to be costing points. */
+function pastAim(value: number, target: number): boolean {
+  return target > 0 && value / target > SCORING.overshoot.freeUpTo;
+}
+
+/** Credit for landing near a target from either side, 0–1. */
+function adherenceCredit(value: number, target: number): number {
+  if (!(target > 0)) return 0;
+  const off = Math.abs(value - target) / target;
+  const { fullWithin, zeroAt } = SCORING.netCalories.adherence;
+  if (off <= fullWithin) return 1;
+  return Math.max(0, 1 - (off - fullWithin) / (zeroAt - fullWithin));
+}
+
+/** Appended to a line's detail when it is losing points for going too far. */
+const wayOver = (over: boolean) => (over ? " · way over" : "");
+
 export function scoreDay(
   t: DailyTotals | null,
   date: string,
@@ -214,13 +267,15 @@ export function scoreDay(
 
   /* ---------------- burn ---------------- */
   const burn = rel
-    ? round1(Math.min(1, kcalOut / rel.burnTarget) * SCORING.burn.max)
+    ? round1(aimCredit(kcalOut, rel.burnTarget) * SCORING.burn.max)
     : capped(kcalOut, SCORING.burn.kcalPerPoint, SCORING.burn.max);
+  const burnOver = rel !== null && pastAim(kcalOut, rel.burnTarget);
 
   /* ---------------- protein ---------------- */
   const protein = rel
-    ? round1(Math.min(1, proteinG / rel.proteinTarget) * SCORING.protein.max)
+    ? round1(aimCredit(proteinG, rel.proteinTarget) * SCORING.protein.max)
     : capped(proteinG, SCORING.protein.gramsPerPoint, SCORING.protein.max);
+  const proteinOver = rel !== null && pastAim(proteinG, rel.proteinTarget);
 
   /* ---------------- active minutes ---------------- */
   // Judged against how long YOUR burn target takes at a moderate effort, so
@@ -229,8 +284,9 @@ export function scoreDay(
   // been published — an older card, or a half-filled profile.
   const minutesTarget = rel?.minutesTarget ?? 0;
   const minutes = minutesTarget > 0
-    ? round1(Math.min(1, activeMinutes / minutesTarget) * SCORING.activeMinutes.max)
+    ? round1(aimCredit(activeMinutes, minutesTarget) * SCORING.activeMinutes.max)
     : capped(activeMinutes, SCORING.activeMinutes.minutesPerPoint, SCORING.activeMinutes.max);
+  const minutesOver = pastAim(activeMinutes, minutesTarget);
 
   /* ---------------- calories ---------------- */
   // Guard: without a food log this would hand out full marks for logging
@@ -238,13 +294,14 @@ export function scoreDay(
   const net = kcalIn - kcalOut;
   let netPoints = 0;
   let netDetail = "no food logged";
+  let netOver = false;
 
   if (hasFood && rel) {
-    const off = Math.abs(kcalIn - rel.kcalTarget) / rel.kcalTarget;
-    const band = SCORING.netCalories.adherenceBands.find((b) => off <= b.withinFraction);
-    netPoints = band ? band.points : SCORING.netCalories.adherenceFloor;
+    netPoints = round1(adherenceCredit(kcalIn, rel.kcalTarget) * SCORING.netCalories.max);
     const delta = Math.round(kcalIn - rel.kcalTarget);
     netDetail = `${Math.round(kcalIn)} vs ${rel.kcalTarget} aim (${delta > 0 ? "+" : ""}${delta})`;
+    // Over the target, and far enough over to have cost something.
+    netOver = kcalIn > rel.kcalTarget && netPoints < SCORING.netCalories.max;
   } else if (hasFood) {
     const band = SCORING.netCalories.bands.find((b) => net <= b.upTo);
     netPoints = band ? band.points : 0;
@@ -255,10 +312,12 @@ export function scoreDay(
   const fibreTarget = rel?.fibreTarget ?? 0;
   let fibrePoints = 0;
   let fibreDetail = "no food logged";
+  let fibreOver = false;
 
   if (hasFood && fibreTarget > 0) {
-    fibrePoints = round1(Math.min(1, fibreG / fibreTarget) * SCORING.fibre.max);
-    fibreDetail = `${Math.round(fibreG)} / ${fibreTarget} g`;
+    fibrePoints = round1(aimCredit(fibreG, fibreTarget) * SCORING.fibre.max);
+    fibreOver = pastAim(fibreG, fibreTarget);
+    fibreDetail = `${Math.round(fibreG)} / ${fibreTarget} g${wayOver(fibreOver)}`;
   } else if (hasFood) {
     fibrePoints = capped(fibreG, SCORING.fibre.gramsPerPoint, SCORING.fibre.max);
     fibreDetail = `${Math.round(fibreG)} g`;
@@ -320,19 +379,21 @@ export function scoreDay(
       key: "burn",
       label: "Calories burned",
       detail: rel
-        ? `${Math.round(kcalOut)} / ${rel.burnTarget} kcal`
+        ? `${Math.round(kcalOut)} / ${rel.burnTarget} kcal${wayOver(burnOver)}`
         : `${Math.round(kcalOut)} kcal`,
       points: burn,
       max: SCORING.burn.max,
+      over: burnOver,
     },
     {
       key: "protein",
       label: "Protein",
       detail: rel
-        ? `${Math.round(proteinG)} / ${rel.proteinTarget} g`
+        ? `${Math.round(proteinG)} / ${rel.proteinTarget} g${wayOver(proteinOver)}`
         : `${Math.round(proteinG)} g`,
       points: protein,
       max: SCORING.protein.max,
+      over: proteinOver,
     },
     {
       key: "net",
@@ -340,6 +401,7 @@ export function scoreDay(
       detail: netDetail,
       points: netPoints,
       max: SCORING.netCalories.max,
+      over: netOver,
     },
     {
       key: "fibre",
@@ -347,6 +409,7 @@ export function scoreDay(
       detail: fibreDetail,
       points: fibrePoints,
       max: SCORING.fibre.max,
+      over: fibreOver,
     },
     {
       key: "limits",
@@ -368,10 +431,11 @@ export function scoreDay(
       key: "minutes",
       label: "Active minutes",
       detail: minutesTarget > 0
-        ? `${Math.round(activeMinutes)} / ${minutesTarget} min`
+        ? `${Math.round(activeMinutes)} / ${minutesTarget} min${wayOver(minutesOver)}`
         : `${Math.round(activeMinutes)} min`,
       points: minutes,
       max: SCORING.activeMinutes.max,
+      over: minutesOver,
     },
     {
       key: "logging",
@@ -472,16 +536,31 @@ export interface ScoreGap {
 /** Roughly 5.3 kcal/min for brisk walking at 70 kg (MET 4.3). */
 const KCAL_PER_WALK_MIN = 5.3;
 
+/**
+ * What the trailing side would have had to do to close one line.
+ *
+ * `over` says which way. A line lost by going too far is won back by doing
+ * LESS, at the rate the line falls past its free zone — not by the "more"
+ * the same number of points would take from below.
+ */
 function closeHint(
   key: ScoreLine["key"],
   pointsBehind: number,
   targets: ScoreTargets | null,
+  over = false,
 ): string | null {
   if (pointsBehind <= 0) return null;
   const p = pointsBehind;
+  // Units of an aim per point on the falling side, past the free zone.
+  const pastPerPoint = (target: number, max: number) =>
+    ((SCORING.overshoot.zeroAt - SCORING.overshoot.freeUpTo) * target) / max;
 
   switch (key) {
     case "burn": {
+      if (over && targets) {
+        return `${Math.round(p * pastPerPoint(targets.burnTarget, SCORING.burn.max))} kcal less — ` +
+          "training far past your burn target costs points";
+      }
       // In relative mode a point is worth a share of that person's own burn
       // target, so the advice is in their units rather than a global constant.
       const kcalPerPoint = targets
@@ -492,6 +571,10 @@ function closeHint(
       return `${kcal} kcal more — about a ${mins}-minute brisk walk`;
     }
     case "protein": {
+      if (over && targets) {
+        return `${Math.round(p * pastPerPoint(targets.proteinTarget, SCORING.protein.max))} g less protein — ` +
+          "far past your target costs points";
+      }
       const gramsPerPoint = targets
         ? targets.proteinTarget / SCORING.protein.max
         : SCORING.protein.gramsPerPoint;
@@ -500,16 +583,27 @@ function closeHint(
       return `${grams} g more protein — roughly ${eggs} eggs, or ${eggs * 100} g of paneer`;
     }
     case "minutes": {
+      if (over && targets?.minutesTarget) {
+        return `${Math.round(p * pastPerPoint(targets.minutesTarget, SCORING.activeMinutes.max))} fewer active ` +
+          "minutes — far past your target costs points";
+      }
       const perPoint = targets?.minutesTarget
         ? targets.minutesTarget / SCORING.activeMinutes.max
         : SCORING.activeMinutes.minutesPerPoint;
       return `${Math.round(p * perPoint)} more active minutes`;
     }
-    case "net":
-      return targets
-        ? `get closer to your ${targets.kcalTarget} kcal target`
-        : "eat a little less or move a little more";
+    case "net": {
+      if (!targets) return "eat a little less or move a little more";
+      if (!over) return `get closer to your ${targets.kcalTarget} kcal target`;
+      const { fullWithin, zeroAt } = SCORING.netCalories.adherence;
+      const kcalPerPoint = ((zeroAt - fullWithin) * targets.kcalTarget) / SCORING.netCalories.max;
+      return `about ${Math.round(p * kcalPerPoint)} kcal less — closer to your ${targets.kcalTarget} kcal target`;
+    }
     case "fibre":
+      if (over && targets?.fibreTarget) {
+        return `${Math.round(p * pastPerPoint(targets.fibreTarget, SCORING.fibre.max))} g less fibre — ` +
+          "far past your aim costs points";
+      }
       return targets?.fibreTarget
         ? `${Math.round(p * (targets.fibreTarget / SCORING.fibre.max))} g more fibre — a katori of dal, or a guava`
         : "more fibre — dal, whole fruit, or a millet roti";
@@ -542,11 +636,13 @@ export function compareScores(mine: DayScore, theirs: DayScore): ScoreGap {
       mineDetail: line.detail,
       theirsDetail: other?.detail ?? "—",
       // Addressed to whoever is behind on this line, in THEIR units: their
-      // targets are what decide how much work a point actually represents.
+      // targets are what decide how much work a point actually represents,
+      // and their line says whether they fell short or went too far.
       toClose: closeHint(
         line.key,
         Math.abs(delta),
         delta < 0 ? mine.targets : theirs.targets,
+        delta < 0 ? line.over : other?.over,
       ),
     };
   });
@@ -569,7 +665,8 @@ export function compareScores(mine: DayScore, theirs: DayScore): ScoreGap {
  * Rather than estimating, this re-scores the day with the change applied
  * and takes the difference. That way every cap, guard and band is honoured
  * automatically: adding 300 kcal of burn is worth nothing if you already
- * maxed that line, and the number shown can never contradict the score.
+ * maxed that line, less than nothing if it takes you far past the target,
+ * and the number shown can never contradict the score.
  * ===================================================================== */
 
 export type ImpactComponent =
