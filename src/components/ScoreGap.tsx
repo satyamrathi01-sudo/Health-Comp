@@ -28,10 +28,10 @@ export default function ScoreGap({
 
   const headline =
     gap.leader === "level"
-      ? "Dead level"
+      ? "Tied"
       : gap.leader === "me"
-        ? `You lead by ${Math.abs(gap.delta)}`
-        : `${theirName} leads by ${Math.abs(gap.delta)}`;
+        ? `You're ahead by ${Math.abs(gap.delta)}`
+        : `${theirName} is ahead by ${Math.abs(gap.delta)}`;
 
   // The single biggest thing costing the trailing side.
   const biggestDrop = gap.leader === "them" ? gap.drops[0] : gap.gains[0];
@@ -48,7 +48,7 @@ export default function ScoreGap({
               ? `Mostly on ${biggestDrop.label.toLowerCase()}.`
               : gap.leader === "them"
                 ? `Mostly on ${biggestDrop.label.toLowerCase()}.`
-                : "Identical across the board."}
+                : "Same on every line."}
           </p>
         )}
       </div>
@@ -63,7 +63,7 @@ export default function ScoreGap({
 
       {behindLine?.toClose && (
         <div className="hair px-5 py-3.5">
-          <p className="eyebrow mb-1.5">To close the gap</p>
+          <p className="eyebrow mb-1.5">How to catch up</p>
           <p className="text-[0.8rem] leading-relaxed text-mist-200">
             {behindLine.toClose}
           </p>

@@ -92,19 +92,19 @@ export function trackedLimits(
   if (targets) {
     out.push(
       row("kcal", "Calories", "kcal", n(totals?.kcal_in), targets.kcalTarget,
-        "Your intake aim for today"),
+        "Your calorie target for today"),
     );
     out.push(
       row("carbs_g", "Carbs", "g", n(totals?.carbs_g), targets.carbsTarget,
-        "What is left of your calories after protein and fat"),
+        "Your daily carb limit"),
     );
     out.push(
       row("fat_g", "Fat", "g", n(totals?.fat_g), targets.fatTarget,
-        "Your goal's share of the day's calories"),
+        "Your daily fat limit"),
     );
     out.push(
       row("water_ml", "Water", "ml", n(totals?.water_ml), targets.waterCeilingMl ?? 0,
-        "Far past the aim — very high intake dilutes sodium"),
+        "Much more than your body needs"),
     );
   }
 

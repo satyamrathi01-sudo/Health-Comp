@@ -1,11 +1,19 @@
-import { ACTIVITY_FACTOR, prettyDate, type GoalAdjustedTargets, type WeightPlan } from "@/lib/calc";
+import { bmiBand, prettyDate, type DerivedTargets, type WeightPlan } from "@/lib/calc";
 import type { ActivityLevel, Goal, Profile } from "@/lib/types";
+import { Section } from "./ui";
 
 const GOAL_WORD: Record<Goal, string> = {
   cut: "lose fat",
-  maintain: "hold steady",
+  maintain: "stay the same",
   bulk: "build muscle",
 };
+
+const BMI_WORD = {
+  under: "below the healthy range",
+  healthy: "in the healthy range",
+  over: "above the healthy range",
+  obese: "well above the healthy range",
+} as const;
 
 const fmt = (n: number) => n.toLocaleString("en-GB");
 
@@ -16,36 +24,31 @@ const activityWord = (level: ActivityLevel) => {
   return words[0].toUpperCase() + words.slice(1);
 };
 
-/** Where a number came from, in the words a tile can afford. */
-const origin = (from: "goal" | "manual" | "formula", otherwise: string) =>
-  from === "goal" ? "from this month's goal" : from === "manual" ? "set by you" : otherwise;
+const setByYou = (manual: boolean, otherwise: string) => (manual ? "set by you" : otherwise);
 
 /**
- * The numbers your score is measured against, as tiles.
+ * Your targets as tiles, grouped the way people think about them: where you
+ * are heading, what to do each day, how the calories split, and your body's
+ * own numbers.
  *
- * Laid out in the order they are derived, so reading across and down is
- * reading the calculation: resting burn, times activity, is maintenance;
- * training is asked for on top of it; intake is maintenance moved by the
- * weight plan; protein is set per kilo. The weight goal sits above the lot
- * because it is what moves most of them.
- *
- * Every tile says where its number came from. A resting burn typed in from a
- * metabolic test and one an equation produced deserve different trust, and a
- * monthly goal quietly overriding the formula should never be a surprise.
- *
- * Values arrive goal-adjusted — the same applyGoalsToTargets() the score runs
- * — so no tile can disagree with a scored line.
+ * Every tile says in a few words where its number comes from, so a figure you
+ * typed in is never mistaken for one the app worked out. They are the same
+ * numbers the score uses.
  */
 export default function TargetKpis({
   targets: t,
   profile,
+  avgSleep,
 }: {
-  targets: GoalAdjustedTargets;
+  targets: DerivedTargets;
   profile: Profile;
+  /** Across the nights logged in the loaded window, or null. */
+  avgSleep: number | null;
 }) {
   const weight = Number(profile.weight_kg);
   const delta = t.kcalTarget - t.tdee;
   const perKg = weight > 0 ? (t.proteinTarget / weight).toFixed(1) : null;
+  const fatShare = t.kcalTarget > 0 ? Math.round(((t.fatTarget * 9) / t.kcalTarget) * 100) : 0;
 
   const eat =
     t.basis.kcal === "manual"
@@ -53,59 +56,91 @@ export default function TargetKpis({
       : t.plan
         ? `${signed(delta)} a day to reach ${t.plan.targetKg} kg`
         : delta === 0
-          ? "maintenance, to hold steady"
-          : `${signed(delta)} vs maintenance, to ${GOAL_WORD[profile.goal]}`;
-
-  const proteinFrom = t.source.protein === "goal" ? "goal" : t.basis.protein;
+          ? "what your body uses, to stay the same"
+          : `${signed(delta)} a day to ${GOAL_WORD[profile.goal]}`;
 
   return (
-    <dl className="grid grid-cols-2 gap-2">
+    <div className="space-y-8">
       <WeightGoal plan={t.plan} profile={profile} />
 
-      <Kpi
-        label="Resting burn"
-        value={fmt(t.bmr)}
-        unit="kcal"
-        sub={t.basis.bmr === "manual" ? "measured, set by you" : "Mifflin–St Jeor, from your body"}
-      />
-      <Kpi
-        label="Activity"
-        value={activityWord(profile.activity_level)}
-        sub={`×${ACTIVITY_FACTOR[profile.activity_level]} · ${fmt(t.tdee)} kcal to maintain`}
-      />
+      <Section title="Every day">
+        <dl className="grid grid-cols-2 gap-2">
+          <Kpi label="Eat" value={fmt(t.kcalTarget)} unit="kcal" sub={eat} />
+          <Kpi
+            label="Protein"
+            value={fmt(t.proteinTarget)}
+            unit="g"
+            sub={setByYou(t.basis.protein === "manual", perKg ? `${perKg} g per kg you weigh` : "a day")}
+          />
+          <Kpi
+            label="Burn"
+            value={fmt(t.burnTarget)}
+            unit="kcal"
+            sub={setByYou(t.basis.burn === "manual", "through exercise")}
+          />
+          <Kpi
+            label="Exercise"
+            value={t.minutesTarget > 0 ? fmt(t.minutesTarget) : "—"}
+            unit="min"
+            sub={setByYou(t.basis.minutes === "manual", "at a moderate pace")}
+          />
+        </dl>
+      </Section>
 
-      <Kpi
-        label="Exercise"
-        value={t.minutesTarget > 0 ? fmt(t.minutesTarget) : "—"}
-        unit="min a day"
-        sub={origin(t.basis.minutes, "your burn aim at a moderate pace")}
-      />
-      <Kpi
-        label="Burn"
-        value={fmt(t.burnTarget)}
-        unit="kcal a day"
-        sub={origin(t.source.burn === "goal" ? "goal" : t.basis.burn, "from training")}
-      />
+      <Section title="How your calories split">
+        <dl className="grid grid-cols-3 gap-2">
+          <Kpi
+            label="Carbs"
+            value={fmt(t.carbsTarget)}
+            unit="g"
+            sub={setByYou(Number(profile.carbs_target_g) > 0, "the rest")}
+          />
+          <Kpi
+            label="Fat"
+            value={fmt(t.fatTarget)}
+            unit="g"
+            sub={setByYou(Number(profile.fat_target_g) > 0, `${fatShare}% of calories`)}
+          />
+          <Kpi
+            label="Fibre"
+            value={fmt(t.fiberTarget)}
+            unit="g"
+            sub={setByYou(Number(profile.fiber_target_g) > 0, "14 g per 1,000 kcal")}
+          />
+        </dl>
+      </Section>
 
-      <Kpi label="Eat" value={fmt(t.kcalTarget)} unit="kcal a day" sub={eat} />
-      <Kpi
-        label="Protein"
-        value={fmt(t.proteinTarget)}
-        unit="g a day"
-        sub={[perKg && `${perKg} g per kg`, proteinFrom !== "formula" && origin(proteinFrom, "")]
-          .filter(Boolean)
-          .join(" · ")}
-      />
-    </dl>
+      <Section title="Your body">
+        <dl className="grid grid-cols-2 gap-2">
+          <Kpi
+            label="Calories at rest"
+            value={fmt(t.bmr)}
+            unit="kcal"
+            sub={t.basis.bmr === "manual" ? "BMR, set by you" : "BMR, from your height, weight and age"}
+          />
+          <Kpi
+            label="Activity"
+            value={activityWord(profile.activity_level)}
+            sub={`you use about ${fmt(t.tdee)} kcal a day`}
+          />
+          {t.bmi !== null && (
+            <Kpi label="BMI" value={String(t.bmi)} sub={BMI_WORD[bmiBand(t.bmi)]} />
+          )}
+          {avgSleep !== null && (
+            <Kpi label="Sleep" value={String(avgSleep)} unit="h" sub="on an average night" />
+          )}
+        </dl>
+      </Section>
+    </div>
   );
 }
 
 function WeightGoal({ plan, profile }: { plan: WeightPlan | null; profile: Profile }) {
   const goalKg = Number(profile.weight_goal_kg);
-  const preset = GOAL_WORD[profile.goal];
+  const aim = GOAL_WORD[profile.goal];
 
-  // weightPlan() returns null for three different reasons, and each deserves
-  // its own sentence rather than a blanket "not set".
+  // weightPlan() returns null for three different reasons, and each gets its
+  // own sentence rather than a blanket "not set".
   let value: string;
   let unit: string | undefined;
   let sub: string;
@@ -114,33 +149,33 @@ function WeightGoal({ plan, profile }: { plan: WeightPlan | null; profile: Profi
     value = String(plan.targetKg);
     unit = `kg by ${prettyDate(plan.targetDate)}`;
     sub =
-      `${plan.kgToGo} kg to ${plan.direction} at ${plan.kgPerWeek} kg a week · ` +
+      `${plan.kgToGo} kg to ${plan.direction}, about ${plan.kgPerWeek} kg a week · ` +
       `${plan.daysLeft} ${plan.daysLeft === 1 ? "day" : "days"} left`;
   } else if (goalKg > 0 && !profile.weight_goal_date) {
     value = String(goalKg);
-    unit = "kg, no date";
-    sub = `A weight without a date sets no pace, so targets still follow your goal to ${preset}. Add a date below.`;
+    unit = "kg, no date yet";
+    sub = "Add a date in Edit to turn this into a daily plan.";
   } else if (goalKg > 0) {
     value = String(goalKg);
     unit = "kg · reached";
-    sub = `Targets are back on your goal to ${preset}. Set a new weight and date below to keep going.`;
+    sub = "You got there. Set a new goal in Edit to keep going.";
   } else {
     value = "Not set";
-    sub = `Targets follow your goal to ${preset}. Add a target weight and a date below and every tile recalculates for it.`;
+    sub = `Your targets are set to ${aim}. Add a target weight and a date in Edit for a plan.`;
   }
 
   return (
-    <div className="surface col-span-2 px-5 py-4">
-      <dt className="eyebrow">Weight goal</dt>
-      <dd className="mt-2 flex flex-wrap items-baseline gap-x-1.5">
+    <section className="surface px-5 py-4">
+      <h2 className="eyebrow">Weight goal</h2>
+      <p className="mt-2 flex flex-wrap items-baseline gap-x-1.5">
         <span className="text-[1.7rem] font-semibold leading-none tracking-tight text-white">{value}</span>
         {unit && <span className="text-xs font-medium text-mist-600">{unit}</span>}
-      </dd>
-      <dd className="mt-2 text-[0.7rem] leading-relaxed text-mist-400">{sub}</dd>
+      </p>
+      <p className="mt-2 text-[0.7rem] leading-relaxed text-mist-400">{sub}</p>
       {plan?.note && (
-        <dd className="mt-1.5 text-[0.7rem] leading-relaxed text-gold">{plan.note}</dd>
+        <p className="mt-1.5 text-[0.7rem] leading-relaxed text-gold">{plan.note}</p>
       )}
-    </div>
+    </section>
   );
 }
 

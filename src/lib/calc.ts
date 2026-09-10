@@ -201,9 +201,9 @@ export function weightPlan(
     clamped,
     arrivesOn,
     note: clamped
-      ? `${Math.abs(requested).toLocaleString()} kcal a day off maintenance is not a safe pace. ` +
-        `Held at ${Math.abs(dailyDelta).toLocaleString()}, which reaches ${target} kg around ` +
-        `${prettyDate(arrivesOn)}.`
+      ? `${Math.abs(requested).toLocaleString()} kcal a day ${requested < 0 ? "below" : "above"} ` +
+        `what you use is not a safe pace. We've kept it to ${Math.abs(dailyDelta).toLocaleString()}, ` +
+        `so you'd reach ${target} kg around ${prettyDate(arrivesOn)}.`
       : null,
   };
 }
@@ -388,12 +388,6 @@ export function deriveTargets(p: Profile, today?: string): DerivedTargets | null
  * Keeping this next to deriveTargets is the point: the formula exists once,
  * in TypeScript, and the database stores its output rather than reimplementing
  * it. See the v8 note in supabase/schema.sql.
- *
- * Monthly goals are folded in before anything is published. A rival can no
- * longer read your goals (v11), but they still score your day against what
- * those goals set, so the card carries a goal's effect and never the goal.
- * Every writer must pass the same goals the score applies, or the card and
- * your own screen will disagree until the next page load republishes it.
  */
 export interface PublishedTargets {
   target_kcal: number | null;
@@ -403,21 +397,15 @@ export interface PublishedTargets {
   target_micros: Record<string, number> | null;
 }
 
-export function publishedTargets(
-  p: Profile,
-  today?: string,
-  goals: GoalLike[] = [],
-): PublishedTargets {
-  const day = today ?? localDate(p.timezone);
-  const derived = deriveTargets(p, day);
-  if (!derived) {
+export function publishedTargets(p: Profile, today?: string): PublishedTargets {
+  const t = deriveTargets(p, today);
+  if (!t) {
     return {
       target_kcal: null, target_protein_g: null,
       target_burn_kcal: null, target_active_minutes: null,
       target_micros: null,
     };
   }
-  const t = applyGoalsToTargets(derived, goals, daysInMonthOf(day));
   return {
     target_kcal: t.kcalTarget,
     target_protein_g: t.proteinTarget,
@@ -553,7 +541,7 @@ export function dateRange(from: string, to: string): string[] {
  * `limit` entries are ceilings to stay under; `aim` entries are floors.
  * ===================================================================== */
 
-import type { Micros, MonthlyGoal, Sex as SexT } from "./types.ts";
+import type { Micros, Sex as SexT } from "./types.ts";
 
 /**
  * Reference bodyweights the ICMR-2020 RDAs are set for. The per-kg nutrients
@@ -762,82 +750,6 @@ export function microVerdict(
   return "good";
 }
 
-/* =====================================================================
- * Goals steer the targets.
- *
- * A monthly goal is a statement of intent, so where one overlaps a derived
- * target it wins: if you have said you want 150 g of protein a day, that is
- * what you should be scored against, not the 1.8 g/kg the formula produced.
- * Goals that do not map onto a daily number (workout days, average score,
- * free-text promises) steer the coach instead — see /api/coach.
- * ===================================================================== */
-
-export interface GoalLike {
-  metric: MonthlyGoal["metric"];
-  target_value: number | null;
-  done?: boolean;
-}
-
-export interface TargetSource {
-  protein: "profile" | "goal";
-  burn: "profile" | "goal";
-  kcal: "profile" | "goal";
-}
-
-export interface GoalAdjustedTargets extends DerivedTargets {
-  source: TargetSource;
-}
-
-export function applyGoalsToTargets(
-  base: DerivedTargets,
-  goals: GoalLike[],
-  daysInMonth = 30,
-): GoalAdjustedTargets {
-  const out: GoalAdjustedTargets = {
-    ...base,
-    source: { protein: "profile", burn: "profile", kcal: "profile" },
-  };
-
-  for (const goal of goals) {
-    const value = Number(goal.target_value);
-    if (!Number.isFinite(value) || value <= 0) continue;
-
-    switch (goal.metric) {
-      case "avg_protein_g":
-        out.proteinTarget = Math.round(value);
-        out.source.protein = "goal";
-        break;
-
-      case "total_kcal_burned":
-        // A month-long total only means anything per day.
-        out.burnTarget = Math.max(100, Math.round(value / Math.max(1, daysInMonth)));
-        out.source.burn = "goal";
-        break;
-
-      // weight_kg used to nudge the calorie aim here, guessing a direction
-      // from the gap to today's weight. The profile now carries a real plan —
-      // a target weight AND a date — which produces an exact daily number in
-      // deriveTargets(), so this had nothing left to add and needed a
-      // competitor's bodyweight to compute, which is no longer knowable.
-      //
-      // workout_days, avg_score and custom have no daily equivalent; they are
-      // passed to the coach as intent instead.
-      default:
-        break;
-    }
-  }
-
-  return out;
-}
-
-/**
- * Both layers at once: what the body (or the manual override) says, then what
- * a stated monthly goal overrides.
- *
- * Everyone goes through this — me from my full profile, a competitor from
- * their published card — so the same day scores identically on both our
- * screens.
- */
 /**
  * Where the micronutrient aims for one player come from.
  *
@@ -853,14 +765,18 @@ export interface MicroSource {
   published?: Record<string, number> | null;
 }
 
+/**
+ * Everything the score needs for one player, from their targets.
+ *
+ * Everyone goes through this — me from my full profile, a competitor from
+ * their published card — so the same day scores identically on both our
+ * screens.
+ */
 export function scoreTargetsFrom(
-  base: DerivedTargets | null,
-  goals: GoalLike[],
-  daysInMonth: number,
+  t: DerivedTargets | null,
   micro?: MicroSource | null,
 ): ScoreTargets | null {
-  if (!base) return null;
-  const t = applyGoalsToTargets(base, goals, daysInMonth);
+  if (!t) return null;
 
   // Falls back to aims scaled by the calorie target alone when nothing has
   // been published — imperfect, but a scored line that reads zero because a
@@ -890,11 +806,6 @@ export function scoreTargetsFrom(
       maxSweatAdd: ref.maxSweatAdd,
     })).filter((a) => a.atRest > 0),
   };
-}
-
-export function daysInMonthOf(isoDate: string): number {
-  const d = new Date(isoDate + "T00:00:00Z");
-  return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 0)).getUTCDate();
 }
 
 /* =====================================================================

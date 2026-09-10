@@ -255,55 +255,18 @@ check("projection cannot push past the ceiling",
   beforeTotal + projectedGain({ component: "protein", amount: 9999 }, day, 0, BIG) <= 110, true);
 
 
-// ---- goals steer the targets ----
-import { applyGoalsToTargets, daysInMonthOf, type DerivedTargets } from "../src/lib/calc.ts";
-
-const baseTargets: DerivedTargets = {
-  bmr: 1700, tdee: 2600, kcalTarget: 2100, proteinTarget: 148, burnTarget: 390,
-  minutesTarget: 60, carbsTarget: 240, fatTarget: 65, fiberTarget: 29, bmi: 24.2, plan: null,
-  basis: { bmr: "formula", kcal: "goal", protein: "formula", burn: "formula", minutes: "formula" },
-};
-
-const proteinGoal = applyGoalsToTargets(
-  baseTargets, [{ metric: "avg_protein_g", target_value: 150 }], 30);
-check("a protein goal overrides the formula", proteinGoal.proteinTarget, 150);
-check("and is marked as coming from the goal", proteinGoal.source.protein, "goal");
-check("untouched targets stay from the profile", proteinGoal.source.burn, "profile");
-
-const burnGoal = applyGoalsToTargets(
-  baseTargets, [{ metric: "total_kcal_burned", target_value: 12000 }], 30);
-check("a monthly burn total becomes a daily target", burnGoal.burnTarget, 400);
-
-// A target weight no longer steers the calorie aim from here: the profile
-// carries a real plan (a weight AND a date) that produces an exact number in
-// deriveTargets, and this layer must not second-guess it.
-const weightGoal = applyGoalsToTargets(baseTargets, [{ metric: "weight_kg", target_value: 68 }], 30);
-check("a weight goal leaves the calorie aim to the plan",
-  weightGoal.kcalTarget, baseTargets.kcalTarget);
-
-// Goals without a daily equivalent must not corrupt the targets.
-const soft = applyGoalsToTargets(
-  baseTargets,
-  [{ metric: "workout_days", target_value: 20 }, { metric: "custom", target_value: null }],
-  30);
-check("soft goals leave targets alone", soft.proteinTarget, baseTargets.proteinTarget);
-check("nonsense target values are ignored",
-  applyGoalsToTargets(baseTargets, [{ metric: "avg_protein_g", target_value: -5 }], 30).proteinTarget,
-  baseTargets.proteinTarget);
-
-check("days in month is right for February 2026", daysInMonthOf("2026-02-10"), 28);
-check("days in month is right for September", daysInMonthOf("2026-09-08"), 30);
-
-// A goal must actually change the score, not just the displayed target.
+// ---- your own target decides the protein line ----
+// A protein target set by hand must change the score, not just the number
+// shown on the Goals tab.
 const dayAt150 = T({ protein_g: 150, meals: 3 });
-const withGoal = scoreDay(dayAt150, "d", 0,
+const easierTarget = scoreDay(dayAt150, "d", 0,
   { burnTarget: 390, proteinTarget: 150, kcalTarget: 2100 });
-const withoutGoal = scoreDay(dayAt150, "d", 0,
+const harderTarget = scoreDay(dayAt150, "d", 0,
   { burnTarget: 390, proteinTarget: 200, kcalTarget: 2100 });
-check("hitting your goal target maxes protein",
-  withGoal.lines.find((l) => l.key === "protein")!.points, 25);
+check("hitting your own target maxes protein",
+  easierTarget.lines.find((l) => l.key === "protein")!.points, 25);
 check("a harder target scores the same intake lower",
-  withoutGoal.lines.find((l) => l.key === "protein")!.points < 25, true);
+  harderTarget.lines.find((l) => l.key === "protein")!.points < 25, true);
 
 
 // ---- recovery ----

@@ -226,7 +226,7 @@ export default function WaterBottle({
             </div>
             <div className="tnum mt-1.5 flex justify-between text-[0.62rem] text-mist-600">
               <span>{litres(h.drankMl)} of {litres(h.targetMl)}</span>
-              <span>by now: {litres(h.expectedMl)}</span>
+              <span>aim by now: {litres(h.expectedMl)}</span>
             </div>
           </div>
 
@@ -262,9 +262,9 @@ export default function WaterBottle({
       <p className="hair px-5 py-2 text-[0.6rem] leading-relaxed text-mist-600">
         {target.source === "manual"
           ? `${litres(target.totalMl)} a day, set by you.`
-          : `${litres(target.baseMl)} for your bodyweight` +
-            (target.exerciseMl > 0 ? ` plus ${litres(target.exerciseMl)} for today's training.` : ".")}
-        {" "}Tracked, not scored — like sleep.
+          : `${litres(target.baseMl)} for your weight` +
+            (target.exerciseMl > 0 ? ` + ${litres(target.exerciseMl)} for today's workout.` : ".")}
+        {" "}Not part of your score.
       </p>
     </div>
   );

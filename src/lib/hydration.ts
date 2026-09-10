@@ -162,12 +162,12 @@ export function hydration(drankMl: number, target: WaterTarget, hour: number): H
 }
 
 const HEADLINE: Record<HydrationStatus, string> = {
-  over: "That is a lot of water",
-  met: "Target hit",
-  ahead: "Ahead of the day",
+  over: "That's a lot of water",
+  met: "Goal reached",
+  ahead: "Ahead of schedule",
   "on-track": "On track",
-  behind: "Falling behind",
-  low: "Well short",
+  behind: "A little behind",
+  low: "Well behind",
 };
 
 function guidanceFor(
@@ -182,22 +182,21 @@ function guidanceFor(
 
   switch (status) {
     case "over":
-      return `${litres(drank)} against a ${litres(targetMl)} aim. More is not better past ` +
-        `this point — very high intake dilutes sodium rather than helping anything.`;
+      return `${litres(drank)} so far, and your goal was ${litres(targetMl)}. ` +
+        `More water won't help past this point.`;
     case "met":
       return remainingMl === 0 && drank > targetMl
-        ? `${litres(drank)} down, ${litres(drank - targetMl)} clear of the aim.`
-        : "Done for the day. Keep sipping if you are still training.";
+        ? `${litres(drank)} so far, ${litres(drank - targetMl)} over your goal.`
+        : "Done for today. Keep sipping if you're still training.";
     case "ahead":
-      return `${litres(remainingMl)} left — ${glasses}. You are ${litres(aheadMl)} up on the clock.`;
+      return `${litres(remainingMl)} to go (${glasses}). You're ${litres(aheadMl)} ahead.`;
     case "on-track":
-      return `${litres(remainingMl)} left — ${glasses} across the rest of the day.`;
+      return `${litres(remainingMl)} to go, about ${glasses}.`;
     case "behind":
-      return `${litres(Math.abs(aheadMl))} behind where the day should have you. ` +
-        `A glass now puts you back on it.`;
+      return `${litres(Math.abs(aheadMl))} behind for this time of day. Have a glass now.`;
     case "low":
-      return `${litres(Math.abs(aheadMl))} behind, ${litres(remainingMl)} still to go. ` +
-        `Start with a glass rather than trying to make it up at bedtime.`;
+      return `${litres(Math.abs(aheadMl))} behind, ${litres(remainingMl)} to go. ` +
+        `Have a glass now rather than catching up at night.`;
   }
 }
 

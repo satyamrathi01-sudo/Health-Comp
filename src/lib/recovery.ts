@@ -87,7 +87,7 @@ export function computeRecovery(input: RecoveryInput): Recovery {
       band: null,
       drivers: [],
       headline: "Log your sleep",
-      guidance: "Recovery is mostly about how you slept, so it needs last night's hours.",
+      guidance: "Add last night's sleep below to see how ready you are.",
     };
   }
 
@@ -137,14 +137,14 @@ export function computeRecovery(input: RecoveryInput): Recovery {
       detail: `${input.sleepHours} h${input.sleepQuality ? `, ${input.sleepQuality}` : ""}`,
     },
     {
-      label: "Yesterday's load",
+      label: "Training",
       value: round1(load),
       detail:
         input.yesterdayBurn > 0
-          ? `${Math.round(input.yesterdayBurn)} kcal burned${restDebt > 0 ? `, ${input.consecutiveTrainingDays} days straight` : ""}`
-          : "rested",
+          ? `${Math.round(input.yesterdayBurn)} kcal yesterday${restDebt > 0 ? `, ${input.consecutiveTrainingDays} days in a row` : ""}`
+          : "rested yesterday",
     },
-    { label: "Fuelling", value: round1(fuel), detail: fuelDetail },
+    { label: "Food", value: round1(fuel), detail: fuelDetail },
   ];
 
   // Name the weakest link rather than giving generic advice.
@@ -160,16 +160,16 @@ export function computeRecovery(input: RecoveryInput): Recovery {
   }
 
   const headline =
-    band === "high" ? "Ready to go hard" : band === "moderate" ? "Train, but controlled" : "Back off today";
+    band === "high" ? "Ready to go hard" : band === "moderate" ? "Train, but go easy" : "Take it easy today";
 
   const guidance =
     band === "high"
-      ? "Good window for a hard session or a personal best."
+      ? "A good day for a hard workout."
       : weakest.label === "Sleep"
-        ? "Sleep is the limiter. Keep today moderate and get to bed earlier."
-        : weakest.label === "Yesterday's load"
-          ? "You are carrying fatigue. Something easy today, or take the rest day."
-          : "Under-fuelled. Eat properly today before training hard again.";
+        ? "Sleep is the limiter. Go easy today and get to bed earlier."
+        : weakest.label === "Training"
+          ? "You're tired from recent training. Do something easy, or take a rest day."
+          : "You didn't eat enough. Eat properly today before training hard again.";
 
   return { score, band, drivers, headline, guidance };
 }

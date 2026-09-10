@@ -185,18 +185,18 @@ function headline(
     // Maintenance has no "forward": movement in either direction is drift.
     return Math.abs(achievedKg) < 0.3
       ? "Holding steady"
-      : `Drifting by ${Math.abs(achievedKg)} kg`;
+      : `Off by ${Math.abs(achievedKg)} kg`;
   }
   if (achievedKg <= 0) {
-    return `No ground ${verb} yet`;
+    return `Nothing ${verb} yet`;
   }
   const pace =
     Math.abs(aheadKg) < 0.1
-      ? "bang on pace"
+      ? "right on track"
       : aheadKg > 0
-        ? `${aheadKg} kg ahead of pace`
-        : `${Math.abs(aheadKg)} kg behind pace`;
-  return `${achievedKg} kg ${verb} — ${pace}`;
+        ? `${aheadKg} kg ahead of plan`
+        : `${Math.abs(aheadKg)} kg behind plan`;
+  return `${achievedKg} kg ${verb} · ${pace}`;
 }
 
 function detail(
@@ -211,12 +211,10 @@ function detail(
   if (direction === "hold") {
     const parts = [`${logged - backDays} held`, `${backDays} drifted`];
     if (unlogged) parts.push(`${unlogged} not logged`);
-    return `${parts.join(" · ")} — a step appears on any day you landed more than ` +
-      `${FLAT_KCAL} kcal either side of maintenance.`;
+    return `${parts.join(" · ")}. A bar means that day was more than ${FLAT_KCAL} kcal off.`;
   }
 
   const parts = [`${forwardDays} forward`, `${backDays} back`];
   if (unlogged) parts.push(`${unlogged} not logged`);
-  const goal = direction === "gain" ? "surplus" : "deficit";
-  return `${parts.join(" · ")} — each step is that day's ${goal} against what you ate and burned.`;
+  return `${parts.join(" · ")}. A bar up means that day moved you toward your goal.`;
 }

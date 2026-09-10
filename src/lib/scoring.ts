@@ -359,8 +359,8 @@ export function scoreDay(
     },
     {
       key: "micros",
-      label: "Micronutrients",
-      detail: microAims.length > 0 ? microDetail : "needs published aims",
+      label: "Vitamins & minerals",
+      detail: microAims.length > 0 ? microDetail : "no targets yet",
       points: microPoints,
       max: microAims.length > 0 ? SCORING.micros.max : 0,
     },
@@ -507,16 +507,16 @@ function closeHint(
     }
     case "net":
       return targets
-        ? `land closer to your ${targets.kcalTarget} kcal target`
-        : "eat a little less, or train a little more, to close the calorie gap";
+        ? `get closer to your ${targets.kcalTarget} kcal target`
+        : "eat a little less or move a little more";
     case "fibre":
       return targets?.fibreTarget
         ? `${Math.round(p * (targets.fibreTarget / SCORING.fibre.max))} g more fibre — a katori of dal, or a guava`
         : "more fibre — dal, whole fruit, or a millet roti";
     case "limits":
-      return "keep added sugar and saturated fat under their ceilings";
+      return "keep added sugar and saturated fat under their limits";
     case "micros":
-      return "a more varied plate — the aims you missed are listed on Today";
+      return "eat a wider mix of foods — see Vitamins & minerals on Today";
     case "logging":
       return "log both food and training — a rest day counts";
     case "streak":

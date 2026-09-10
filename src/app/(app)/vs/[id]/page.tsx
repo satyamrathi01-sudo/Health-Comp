@@ -7,13 +7,17 @@ import { EmptyState, PageHeader, Section } from "@/components/ui";
 import ScoreGap from "@/components/ScoreGap";
 import ProteinVersus from "@/components/ProteinVersus";
 import DayVersus from "@/components/DayVersus";
+import SubTabs from "@/components/SubTabs";
 
 export const dynamic = "force-dynamic";
 
 const YOU = "var(--color-lime-glow)";
 const THEM = "var(--color-flame)";
 
-
+/**
+ * One rival, head to head. The record stays on top; the same two tabs as
+ * Versus sit below it, so the two screens read the same way.
+ */
 export default async function OneOnOnePage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   // Only today needs item rows now; the rest of the page is scores.
@@ -54,27 +58,21 @@ export default async function OneOnOnePage({ params }: { params: Promise<{ id: s
   const todayMine = me.scores.get(arena.today)!;
   const todayTheirs = them.scores.get(arena.today)!;
 
-  const proteinArgs = {
+  // Today only. Every comparison here is one day, and Past days is how a span
+  // gets looked at.
+  const todayProtein = compareProtein({
+    mineItems: itemsFor(arena, arena.me.id, arena.today),
+    theirItems: itemsFor(arena, them.profile.id, arena.today),
     mineTarget: me.targets?.proteinTarget ?? 0,
     theirTarget: them.targets?.proteinTarget ?? 0,
     theirName: firstName,
-  };
-
-  // Today only. A rolling fortnight total was the last place in the app where
-  // a number covered a span rather than a day, and it consistently read as a
-  // live standing when it was not one. Every comparison here is now one day,
-  // and the day-by-day list below is how a span gets looked at.
-  const todayProtein = compareProtein({
-    ...proteinArgs,
-    mineItems: itemsFor(arena, arena.me.id, arena.today),
-    theirItems: itemsFor(arena, them.profile.id, arena.today),
   });
 
   return (
-    <div className="rise space-y-8">
+    <div className="rise space-y-6">
       <PageHeader
         title={`You vs ${firstName}`}
-        subtitle="Head to head, last 30 days"
+        subtitle="Last 30 days"
         right={
           <Link href="/vs" className="text-xs font-semibold text-lime-glow">
             All
@@ -88,13 +86,13 @@ export default async function OneOnOnePage({ params }: { params: Promise<{ id: s
           <div className="mt-2 text-xs text-mist-600">You</div>
         </div>
         <div className="text-center">
-          <div className="eyebrow">record</div>
+          <div className="eyebrow">days won</div>
           <div className="mt-2 flex items-baseline gap-1.5">
             <span className="hero-num tnum text-3xl" style={{ color: YOU }}>{wins}</span>
             <span className="text-mist-600">–</span>
             <span className="hero-num tnum text-3xl" style={{ color: THEM }}>{losses}</span>
           </div>
-          {draws > 0 && <div className="tnum mt-1 text-[0.65rem] text-mist-600">{draws} drawn</div>}
+          {draws > 0 && <div className="tnum mt-1 text-[0.65rem] text-mist-600">{draws} tied</div>}
         </div>
         <div className="text-center">
           <div className="text-3xl" aria-hidden="true">{them.profile.avatar_emoji}</div>
@@ -102,44 +100,57 @@ export default async function OneOnOnePage({ params }: { params: Promise<{ id: s
         </div>
       </section>
 
-      {/* ---------- what actually made the protein gap ---------- */}
-      <Section title="Protein, food by food">
-        <ProteinVersus comparison={todayProtein} theirName={firstName} scope="Today" />
-      </Section>
-
-      {/* ---------- today, explained ---------- */}
-      <Section title="Today, line by line">
-        <ScoreGap mine={todayMine} theirs={todayTheirs} theirName={firstName} />
-      </Section>
-
-      {/* ---------- fixtures ---------- */}
-      <Section
-        title="Every day"
-        action={<span className="text-[0.65rem] text-mist-600">tap a day</span>}
-      >
-        {fixtures.length === 0 ? (
-          <EmptyState icon="○" title="No logged days yet" />
-        ) : (
-          <div className="surface px-5">
-            {fixtures.map((f, i) => (
-              <DayVersus
-                key={f.day}
-                day={f.day}
-                mine={f.a}
-                theirs={f.b}
-                isToday={f.day === arena.today}
-                first={i === 0}
-                rivalId={them.profile.id}
-              />
-            ))}
-          </div>
-        )}
-      </Section>
+      <SubTabs
+        label={`You vs ${firstName}`}
+        tabs={[
+          {
+            id: "today",
+            label: "Today",
+            content: (
+              <>
+                <Section title="Today's score">
+                  <ScoreGap mine={todayMine} theirs={todayTheirs} theirName={firstName} />
+                </Section>
+                <Section title="Protein by food">
+                  <ProteinVersus comparison={todayProtein} theirName={firstName} scope="Today" />
+                </Section>
+              </>
+            ),
+          },
+          {
+            id: "days",
+            label: "Past days",
+            content: (
+              <Section
+                title="Each day"
+                action={<span className="text-[0.65rem] text-mist-600">tap a day to open it</span>}
+              >
+                {fixtures.length === 0 ? (
+                  <EmptyState icon="○" title="No logged days yet" />
+                ) : (
+                  <div className="surface px-5">
+                    {fixtures.map((f, i) => (
+                      <DayVersus
+                        key={f.day}
+                        day={f.day}
+                        mine={f.a}
+                        theirs={f.b}
+                        isToday={f.day === arena.today}
+                        first={i === 0}
+                        rivalId={them.profile.id}
+                      />
+                    ))}
+                  </div>
+                )}
+              </Section>
+            ),
+          },
+        ]}
+      />
 
       <p className="px-1 text-[0.62rem] leading-relaxed text-mist-600">
-        {firstName} is scored against {firstName}&apos;s own targets and you against yours, so
-        this is a comparison of effort. Neither of you can see the other&apos;s height, weight,
-        age or weigh-ins.
+        You&apos;re each scored against your own targets, so this compares effort. Neither
+        of you can see the other&apos;s height, weight, age or weigh-ins.
       </p>
     </div>
   );

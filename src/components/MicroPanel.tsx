@@ -8,12 +8,12 @@ const TONE = {
 } as const;
 
 /**
- * Micronutrients against Indian (ICMR) reference values, every one of them
- * scaled to this person and this day rather than to a reference adult — see
- * microTarget() in calc.ts for what moves each one and how strongly.
+ * Vitamins and minerals against Indian (ICMR) reference values, every one of
+ * them scaled to this person and this day rather than to a reference adult —
+ * see microTarget() in calc.ts for what moves each one and how strongly.
  *
- * Nothing here feeds the score. It is context, and the input the coach
- * reasons over.
+ * The aims and the sugar and saturated-fat ceilings feed small lines on the
+ * score; sodium is shown for context only.
  */
 export default function MicroPanel({
   totals, sex, context,
@@ -30,7 +30,7 @@ export default function MicroPanel({
   if (!totals || totals.meals === 0) {
     return (
       <p className="px-1 py-3 text-xs text-mist-600">
-        Log a meal to see how your micronutrients are tracking.
+        Log a meal to see your vitamins and minerals.
       </p>
     );
   }
@@ -48,8 +48,7 @@ export default function MicroPanel({
     <div>
       {flagged.length > 0 && (
         <p className="mb-3 text-[0.7rem] leading-relaxed text-mist-400">
-          {flagged.length} to watch:{" "}
-          {flagged.map((f) => f.ref.label).join(", ")}
+          Keep an eye on: {flagged.map((f) => f.ref.label).join(", ")}
         </p>
       )}
       <div className="surface px-4">
@@ -75,14 +74,14 @@ export default function MicroPanel({
             </div>
             {verdict !== "good" && (
               <p className="mt-1.5 text-[0.65rem] text-mist-600">
-                {verdict === "over" ? "Over the limit — " : "Running low — "}
-                {ref.why.toLowerCase()}
+                {verdict === "over" ? "Over the limit. " : "Running low. "}
+                {ref.why}.
               </p>
             )}
             {context && (
               <p className="mt-1 text-[0.6rem] text-mist-600">
-                Set by {ref.moves}
-                {ref.perSweat > 0 && context.exerciseKcal > 0 ? " — raised by today's session" : ""}
+                Based on {ref.moves}
+                {ref.perSweat > 0 && context.exerciseKcal > 0 ? ", plus today's workout" : ""}
               </p>
             )}
           </div>

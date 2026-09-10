@@ -1517,29 +1517,21 @@ grant execute on function public.get_day_detail(uuid, date) to authenticated;
 -- =====================================================================
 -- v11 — what you are aiming for is nobody else's business.
 --
--- The Goals tab now holds everything the score measures you against:
--- resting burn, activity level, the weight plan, every daily aim and this
--- month's goals. Two pieces of that were still readable by the people you
--- compete against, even though no screen showed them any more:
+-- Two tables were still readable by the people you compete against, even
+-- though no screen showed them any more:
 --
 --   * monthly_goals kept its mates-read policy, so a challenge-mate could
 --     list your goals — "Reach 72 kg" included, which is a body measurement
 --     under another name.
 --   * daily_advice kept one too, and the coach writes from a briefing that
---     quotes your weight, your plan and those goals.
+--     quotes your weight and your plan.
 --
--- Both policies go. The one thing a goal does that a rival genuinely needs
--- is its effect on your targets: a 150 g protein goal IS a 150 g protein
--- target, and they cannot score your day without it. So the app now folds
--- goals into the published card before writing it (publishedTargets() in
--- calc.ts), and rivals are scored from the card alone. The card gains no
--- columns and says nothing the scoreboard did not already — "96 / 150 g"
--- was always on it — while the goal, its title and any weight in it stay
--- behind.
+-- Both policies go.
 --
--- A card published before this release has no goals folded in. It corrects
--- itself on that player's next page load, the way a drifted card always
--- has; until then their goal counts on their own screen and not on yours.
+-- Monthly goals have since been retired from the app. A goal only ever
+-- overrode a protein or burn target, and the Goals tab now sets those
+-- directly. The table is kept so nobody's rows are lost, but nothing reads
+-- it, and get_arena below no longer returns it.
 -- =====================================================================
 
 drop policy if exists monthly_goals_mates_read on public.monthly_goals;
@@ -1582,9 +1574,8 @@ grant execute on function public.players_in_challenges(date) to authenticated;
 --
 -- Same three arguments as v8, so no caller changes and a build from before
 -- this release keeps working against it. Two differences in what comes back:
---   * goals are mine only. RLS enforces that on its own now the mates policy
---     is gone; the filter says so here as well, so the shape of the payload
---     does not hinge on a policy somewhere else in this file.
+--   * no goals. Monthly goals are retired (see the top of v11), and an older
+--     build reads a missing goals list as an empty one.
 --   * players_enrolled, the headcount above, resolved against my today.
 -- ---------------------------------------------------------------------
 create or replace function public.get_arena(
@@ -1665,13 +1656,6 @@ begin
                       from public.daily_totals t
                      where t.user_id = any(member_ids)
                        and t.local_date between from_date and today), '[]'::jsonb),
-    -- Mine only. What a rival's goals do to their targets is already on
-    -- their card; the goals themselves do not leave their account.
-    'goals',     coalesce(
-                   (select jsonb_agg(to_jsonb(g))
-                      from public.monthly_goals g
-                     where g.user_id = uid
-                       and g.month = date_trunc('month', today)::date), '[]'::jsonb),
     'today_food', coalesce(
                    (select jsonb_agg(to_jsonb(f) order by f.logged_at)
                       from public.food_logs f

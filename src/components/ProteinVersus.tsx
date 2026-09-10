@@ -91,7 +91,7 @@ export default function ProteinVersus({
 
       {/* ---- the one thing to change ---- */}
       <div className="hair px-5 py-4">
-        <p className="eyebrow mb-1.5">{behind ? "The swap" : "What is working"}</p>
+        <p className="eyebrow mb-1.5">{behind ? "Try this" : "What's working"}</p>
         <p className="text-[0.8rem] leading-relaxed text-mist-200">{c.explain}</p>
       </div>
     </div>
@@ -110,7 +110,7 @@ function TargetBar({
           {Math.round(pct * 100)}%
           <span className="text-mist-600">
             {" "}
-            of their own aim
+            of target
           </span>
         </span>
       </div>

@@ -53,7 +53,7 @@ export default function SleepCard({
         className="surface flex w-full items-center justify-between px-5 py-4 text-left"
       >
         <div>
-          <div className="eyebrow">Sleep</div>
+          <div className="eyebrow">Last night</div>
           <div className="mt-1.5 flex items-baseline gap-1.5">
             <span className="hero-num tnum text-2xl">{initialHours}</span>
             <span className="text-xs text-mist-600">h</span>

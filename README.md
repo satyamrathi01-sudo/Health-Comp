@@ -45,7 +45,9 @@ First person signs up → sets their stats → **Start one** → gets a 6-charac
 invite code. Second person signs up → **Join with code**. You now have a rival.
 
 On your phone, open the site and **Add to Home Screen** — it installs as a
-standalone app, no app store involved.
+standalone app, no app store involved. The app offers this itself the first time
+you sign in on a device: a one-tap button on Android, and the two Share-menu steps
+on iPhone, where browsers allow nothing more.
 
 ---
 
@@ -207,28 +209,23 @@ a red banner.
 
 ## What your rivals can see
 
-Your name and your emoji. The daily aims your score is measured against, with
-any monthly goal already applied. Your food, your training and your daily score,
-which is the whole point of the challenge.
+Your name and your emoji. The daily targets your score is measured against. Your
+food, your training and your daily score, which is the whole point of the
+challenge.
 
 Not your height, weight, age, sex, BMI, BMR, activity level, weigh-ins, weight
-plan, monthly goals or the coach's notes. Nothing on the **Goals** tab is theirs
-to see.
+plan or the coach's notes. The **Goals** tab is yours alone.
 
 This is enforced in the database, not in the UI. The browser holds an anon key
 and can run its own queries, so a number left out of a React component is not
 hidden at all — the fix has to be that the row never leaves Postgres:
 
 - `profiles` is readable only by its owner. The policy that let challenge-mates
-  read it is gone, as are the ones on `weigh_ins`, `monthly_goals` and
-  `daily_advice`.
+  read it is gone, as are the ones on `weigh_ins`, `daily_advice` and the retired
+  `monthly_goals`.
 - Everything the app needs about someone else comes through **`player_cards`**, a
   view gated by the same `can_see()` hub-and-spoke rule as everything else.
-- `get_arena()` returns your own profile and goals in full, and everyone else as
-  a card.
-- A goal still changes what you are scored against, so `publishedTargets()` folds
-  it into your card before writing it. A rival scores your day against a 150 g
-  protein aim without ever reading the goal that set it.
+- `get_arena()` returns your own profile in full, and everyone else as a card.
 
 The one figure that crosses challenges is the count at the top of **Versus**: how
 many people are in a running challenge anywhere. It comes from a `security
@@ -335,7 +332,6 @@ src/lib/calc.ts       BMR, BMI, targets, the weight plan, MET burn, local dates
 src/lib/versus.ts     why they are ahead on protein, food by food
 src/lib/limits.ts     every ceiling, in one list
 src/lib/progress.ts   the forward/back walk and the pace marker
-src/lib/goals.ts      monthly goal progress, shared by Today and Goals
 src/lib/hydration.ts  the water aim, the pace against the clock, the bottle
 src/lib/portions.ts   re-pricing a meal when you edit a portion
 src/lib/gemini.ts     prompts + schemas, server-only
@@ -344,10 +340,14 @@ src/app/(app)/        Today · Versus · Log · Goals · Me
 supabase/schema.sql   tables, RLS, views, helper functions
 ```
 
-**Today is yours alone** — your score, your ceilings, your plan, your goals. No
-rival appears on it. Comparison lives on **Versus**, where you go when you want
-it. A dashboard that opens with someone else's number is a dashboard about
-someone else.
+**Today is yours alone** — your score, your ceilings, your plan. No rival appears
+on it. Comparison lives on **Versus**, where you go when you want it. A dashboard
+that opens with someone else's number is a dashboard about someone else.
+
+Today, Versus and Goals are each split into a few tabs rather than one long
+scroll — Today into Score, Log and Body; Versus into Today and Past days; Goals
+into Targets and Edit. Limit warnings stay above the tabs, where they cannot be
+missed. The open tab is kept in `?tab=`, so a link can open one directly.
 
 ## Deploying
 

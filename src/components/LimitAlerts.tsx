@@ -65,8 +65,9 @@ export default function LimitAlerts({ limits }: { limits: TrackedLimit[] }) {
 
               <p className="mt-1.5 text-[0.65rem] leading-relaxed text-mist-400">
                 {l.state === "over"
-                  ? `${l.over} ${l.unit} over — ${l.why.toLowerCase()}`
-                  : `${Math.round((1 - l.pct) * l.limit * 10) / 10} ${l.unit} left — ${l.why.toLowerCase()}`}
+                  ? `${l.over} ${l.unit} over.`
+                  : `${Math.round((1 - l.pct) * l.limit * 10) / 10} ${l.unit} left.`}{" "}
+                <span className="text-mist-600">{l.why}.</span>
               </p>
             </div>
           );

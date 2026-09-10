@@ -3,18 +3,16 @@
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { createClient } from "@/lib/supabase/client";
-import { publishedTargets, type GoalLike } from "@/lib/calc";
+import { publishedTargets } from "@/lib/calc";
 import type { Profile } from "@/lib/types";
 
 export default function WeighIn({
-  userId, today, profile, goals, current, delta,
+  userId, today, profile, current, delta,
 }: {
   userId: string;
   today: string;
   /** Needed to republish the targets that move with bodyweight. */
   profile: Profile;
-  /** This month's goals, which every published card has folded in. */
-  goals: GoalLike[];
   current: number;
   delta: number | null;
 }) {
@@ -39,7 +37,7 @@ export default function WeighIn({
     const next: Profile = { ...profile, weight_kg: weight };
     await supabase
       .from("profiles")
-      .update({ weight_kg: weight, ...publishedTargets(next, today, goals) })
+      .update({ weight_kg: weight, ...publishedTargets(next, today) })
       .eq("id", userId);
 
     setBusy(false);
@@ -68,12 +66,12 @@ export default function WeighIn({
           <span className={delta < 0 ? "font-semibold text-lime-glow" : "font-semibold text-flame"}>
             {delta > 0 ? "+" : ""}{delta} kg
           </span>{" "}
-          since your first logged weigh-in
+          since your first weigh-in
         </p>
       )}
 
       <p className="mt-3 text-[0.62rem] leading-relaxed text-mist-600">
-        Weigh-ins are yours alone — nobody you are competing against can read them.
+        Only you can see your weigh-ins.
       </p>
     </div>
   );

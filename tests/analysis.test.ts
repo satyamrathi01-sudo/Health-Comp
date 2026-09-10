@@ -7,7 +7,7 @@
  * `node --experimental-strip-types`.
  */
 import {
-  ageFrom, bmi, bmiBand, bmr, cardTargets, daysBetween, daysInMonthOf, deriveTargets,
+  ageFrom, bmi, bmiBand, bmr, cardTargets, daysBetween, deriveTargets,
   publishedTargets, scoreTargetsFrom, weightPlan, MICRO_REFS, microTarget, PLAN_LIMITS, KCAL_PER_KG,
   REFERENCE_KCAL, REFERENCE_WEIGHT_KG, type DerivedTargets,
 } from "../src/lib/calc.ts";
@@ -176,37 +176,18 @@ check("an un-onboarded card has no targets",
     target_kcal: null, target_protein_g: null, target_burn_kcal: null,
     target_active_minutes: null, target_micros: null }), null);
 
-// Goals are private from v11, but what a goal does to a target is not
-// optional: a rival cannot score the day without it. So it rides on the card.
-const monthGoals = [
-  { metric: "avg_protein_g" as const, target_value: 150 },
-  { metric: "total_kcal_burned" as const, target_value: 12000 },
-];
-const goalCard = publishedTargets(person(), TODAY, monthGoals);
-check("a protein goal is published as the protein aim", goalCard.target_protein_g, 150);
-check("a monthly burn goal is published per day of that month",
-  goalCard.target_burn_kcal, Math.round(12000 / daysInMonthOf(TODAY)));
-check("a goal with no daily number publishes nothing different",
-  publishedTargets(person(), TODAY, [{ metric: "weight_kg", target_value: 70 }]), published);
-
-// The invariant the arrangement rests on: scoring my day from my card, with
-// no sight of my goals, lands on exactly the score I see myself.
-const goalDay = T({
+// The invariant the whole card rests on: scoring my day from what I publish
+// lands on exactly the score I see myself, micronutrients included.
+const sampleDay = T({
   meals: 3, kcal_in: 2150, protein_g: 128, fiber_g: 24, sugar_g: 30, satfat_g: 18,
   iron_mg: 14, calcium_mg: 700, kcal_out: 340, active_minutes: 42, sessions: 1,
 });
-const ownView = scoreTargetsFrom(deriveTargets(person(), TODAY), monthGoals,
-  daysInMonthOf(TODAY), { sex: "male", weightKg: 80 });
+const ownView = scoreTargetsFrom(deriveTargets(person(), TODAY), { sex: "male", weightKg: 80 });
 const rivalView = scoreTargetsFrom(
-  cardTargets({ id: "u", display_name: "Sam", avatar_emoji: "🔥", created_at: "", ...goalCard }),
-  [], daysInMonthOf(TODAY), { published: goalCard.target_micros });
-check("a rival scores my goal-adjusted day exactly as I do",
-  scoreDay(goalDay, TODAY, 4, rivalView).lines, scoreDay(goalDay, TODAY, 4, ownView).lines);
-check("and the goal genuinely moved that score",
-  scoreDay(goalDay, TODAY, 4, rivalView).total !== scoreDay(goalDay, TODAY, 4,
-    scoreTargetsFrom(deriveTargets(person(), TODAY), [], daysInMonthOf(TODAY),
-      { sex: "male", weightKg: 80 })).total,
-  true);
+  cardTargets({ id: "u", display_name: "Sam", avatar_emoji: "🔥", created_at: "", ...published }),
+  { published: published.target_micros });
+check("a rival scores my day exactly as I do",
+  scoreDay(sampleDay, TODAY, 4, rivalView).lines, scoreDay(sampleDay, TODAY, 4, ownView).lines);
 
 /* ===================== ceilings ===================== */
 

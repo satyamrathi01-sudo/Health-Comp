@@ -80,7 +80,7 @@ export default function AdviceCard({ hasData }: { hasData: boolean }) {
     return (
       <div className="surface px-5 py-6 text-center">
         <p className="text-xs leading-relaxed text-mist-600">
-          Log a meal or a workout and you&apos;ll get pointers for tomorrow here.
+          Log a meal or a workout to get tips for tomorrow.
         </p>
       </div>
     );
@@ -135,13 +135,13 @@ export default function AdviceCard({ hasData }: { hasData: boolean }) {
                       on today&apos;s score
                     </>
                   ) : p.component === "sleep" ? (
-                    "Not scored — but it drives recovery and tomorrow's training"
+                    "Not scored, but it helps you recover"
                   ) : p.component === "water" ? (
-                    "Not scored — but it drives how the training actually feels"
+                    "Not scored, but it helps your workouts"
                   ) : p.component === "micros" ? (
-                    "Not scored — long-term health, not points"
+                    "Good for long-term health"
                   ) : (
-                    "No points left on that line today"
+                    "You've already maxed this today"
                   )}
                 </span>
               )}
@@ -151,7 +151,7 @@ export default function AdviceCard({ hasData }: { hasData: boolean }) {
       </ul>
       <div className="hair flex items-center justify-between gap-3 px-5 py-2.5">
         <p className="text-[0.6rem] text-mist-600">
-          {advice.stale ? "You've logged more since this" : ""}
+          {advice.stale ? "You've logged more since these tips" : ""}
         </p>
         <button
           onClick={refresh}

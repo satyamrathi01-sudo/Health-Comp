@@ -1,4 +1,3 @@
-import Link from "next/link";
 import type { Recovery } from "@/lib/recovery";
 
 const BAND_COLOR = {
@@ -7,12 +6,17 @@ const BAND_COLOR = {
   low: "var(--color-danger)",
 } as const;
 
+/**
+ * How ready you are to train, estimated from sleep, yesterday's training and
+ * what you ate. It sits directly above the Sleep card on Today's Body tab,
+ * which is where its main missing input gets filled in.
+ */
 export default function RecoveryCard({ recovery }: { recovery: Recovery }) {
-  // No sleep logged: prompt for the input it leans on rather than showing a
-  // number built mostly out of guesswork.
+  // No sleep logged: say what is missing rather than showing a number built
+  // mostly out of guesswork.
   if (recovery.score === null) {
     return (
-      <Link href="/log" className="surface flex items-center gap-4 px-5 py-4">
+      <div className="surface flex items-center gap-4 px-5 py-4">
         <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-full border-[3px] border-ink-800">
           <span className="text-lg text-mist-600">?</span>
         </div>
@@ -20,7 +24,7 @@ export default function RecoveryCard({ recovery }: { recovery: Recovery }) {
           <p className="text-sm font-semibold text-white">{recovery.headline}</p>
           <p className="mt-0.5 text-[0.7rem] leading-relaxed text-mist-600">{recovery.guidance}</p>
         </div>
-      </Link>
+      </div>
     );
   }
 
@@ -49,8 +53,7 @@ export default function RecoveryCard({ recovery }: { recovery: Recovery }) {
         </div>
 
         <div className="min-w-0 flex-1">
-          <div className="eyebrow">recovery</div>
-          <p className="mt-1 text-sm font-semibold text-white">{recovery.headline}</p>
+          <p className="text-sm font-semibold text-white">{recovery.headline}</p>
           <p className="mt-0.5 text-[0.7rem] leading-relaxed text-mist-600">{recovery.guidance}</p>
         </div>
       </div>
@@ -69,7 +72,7 @@ export default function RecoveryCard({ recovery }: { recovery: Recovery }) {
       </div>
 
       <p className="hair px-5 py-2 text-[0.6rem] leading-relaxed text-mist-600">
-        Estimated from your sleep and training load — not a heart-rate measurement.
+        An estimate from your sleep, training and food, not a heart-rate reading.
       </p>
     </div>
   );

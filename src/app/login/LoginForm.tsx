@@ -4,6 +4,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { supabaseAnonKey, supabaseUrl } from "@/lib/env";
+import { JUST_SIGNED_IN_KEY } from "@/components/InstallPrompt";
 
 type Mode = "in" | "up";
 
@@ -60,6 +61,13 @@ export default function LoginForm() {
       } else {
         const { error } = await supabase.auth.signInWithPassword({ email, password });
         if (error) throw error;
+      }
+
+      // Ask the app to offer "add to home screen" once, on the next screen.
+      try {
+        window.localStorage.setItem(JUST_SIGNED_IN_KEY, "1");
+      } catch {
+        // Storage blocked (private browsing): the offer is skipped, nothing breaks.
       }
 
       router.replace(next);

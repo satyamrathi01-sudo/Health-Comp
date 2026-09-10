@@ -149,7 +149,7 @@ function WorkoutDetail({ log }: { log: WorkoutLog }) {
       ))}
       {log.body_weight_kg && (
         <div className="hair mt-2.5 pt-2.5 text-[0.68rem] text-mist-600">
-          Burn computed at {log.body_weight_kg} kg bodyweight
+          Calories worked out at {log.body_weight_kg} kg body weight
         </div>
       )}
     </div>

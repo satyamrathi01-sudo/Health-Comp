@@ -49,7 +49,6 @@ export default async function MePage() {
           userId={arena.me.id}
           today={arena.today}
           profile={arena.me}
-          goals={arena.goals}
           current={latest ? latest.weight_kg : Number(arena.me.weight_kg) || 0}
           delta={delta}
         />

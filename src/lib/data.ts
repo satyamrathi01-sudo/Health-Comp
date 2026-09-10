@@ -3,7 +3,7 @@ import { after } from "next/server";
 import { redirect } from "next/navigation";
 import { createClient, supabaseConfigured } from "./supabase/server.ts";
 import {
-  addDays, cardTargets, dateRange, daysInMonthOf, deriveTargets,
+  addDays, cardTargets, dateRange, deriveTargets,
   publishedTargets, publishedTargetsMatch, scoreTargetsFrom, type DerivedTargets,
 } from "./calc.ts";
 import { dayOutcome, scoreDay, streakEndingAt, type DayScore, type ScoreTargets } from "./scoring.ts";
@@ -11,7 +11,7 @@ import { computeRecovery, type Recovery } from "./recovery.ts";
 import {
   emptyDailyTotals, MICRO_KEYS, toPlayerCard,
   type Challenge, type ChallengeSummary, type DailyTotals, type DayDetail, type FoodItemRow,
-  type FoodLog, type MonthlyGoal, type PlayerCard, type Profile, type SleepQuality,
+  type FoodLog, type PlayerCard, type Profile, type SleepQuality,
   type WorkoutLog,
 } from "./types.ts";
 
@@ -46,11 +46,6 @@ export interface Arena {
   players: PlayerView[];
   days: string[];
   today: string;
-  /**
-   * My own goals this month, and nobody else's. A rival's goals stopped being
-   * readable in v11; what they do to that rival's targets is on their card.
-   */
-  goals: MonthlyGoal[];
   /**
    * People in a running challenge anywhere in the app, not only in mine.
    * Null against a database that predates v11.
@@ -190,7 +185,6 @@ interface ArenaPayload {
   challenge: Challenge | null;
   players: Record<string, unknown>[];
   totals: Record<string, unknown>[];
-  goals: MonthlyGoal[];
   today_food: FoodLog[];
   today_workouts: WorkoutLog[];
   food_items: Record<string, unknown>[];
@@ -262,7 +256,6 @@ export async function loadArena(options: ArenaOptions = {}): Promise<Arena | nul
   const me = coerceProfile(payload.me);
   const today = payload.today;
   const days = dateRange(payload.from_date, today);
-  const daysThisMonth = daysInMonthOf(today);
 
   const cards = (payload.players ?? []).map(coerceCard);
   const players: PlayerCard[] = cards.length ? cards : [toPlayerCard(me)];
@@ -271,11 +264,7 @@ export async function loadArena(options: ArenaOptions = {}): Promise<Arena | nul
   // My own targets come from my own profile, always freshly derived. A rival's
   // come from the card they published, because their body is not mine to see.
   const myTargets = deriveTargets(me, today);
-  // Filtered even though get_arena returns only mine from v11: a database
-  // still on v10 returns everyone's, and a rival's goals must not reach a
-  // screen whichever schema is live.
-  const myGoals = (payload.goals ?? []).filter((g) => g.user_id === me.id);
-  keepPublishedTargetsFresh(supabase, me, myTargets ? publishedTargets(me, today, myGoals) : null);
+  keepPublishedTargetsFresh(supabase, me, myTargets ? publishedTargets(me, today) : null);
 
   const byUser = new Map<string, Map<string, DailyTotals>>();
   players.forEach((p) => byUser.set(p.id, new Map()));
@@ -286,13 +275,9 @@ export async function loadArena(options: ArenaOptions = {}): Promise<Arena | nul
   // bodies — see the mode note in src/lib/scoring.ts.
   const drafts = players.map((card) => {
     const isMe = card.id === me.id;
-    // A stated goal outranks the formula: if I have said I want 150 g of
-    // protein a day, that is what I am scored against. Mine are applied here.
-    // A rival's arrive already folded into their card, because their goals
-    // themselves are not readable from this side (v11).
     const targets = isMe
-      ? scoreTargetsFrom(myTargets, myGoals, daysThisMonth, { sex: me.sex, weightKg: me.weight_kg })
-      : scoreTargetsFrom(cardTargets(card), [], daysThisMonth, { published: card.target_micros });
+      ? scoreTargetsFrom(myTargets, { sex: me.sex, weightKg: me.weight_kg })
+      : scoreTargetsFrom(cardTargets(card), { published: card.target_micros });
 
     const mine = byUser.get(card.id) ?? new Map<string, DailyTotals>();
     const loggedDates = new Set(
@@ -372,7 +357,6 @@ export async function loadArena(options: ArenaOptions = {}): Promise<Arena | nul
     players: scored,
     days,
     today,
-    goals: myGoals,
     todayFood: payload.today_food ?? [],
     todayWorkouts: payload.today_workouts ?? [],
     foodItems: coerceItems(payload.food_items ?? []),
@@ -387,9 +371,6 @@ export async function loadArena(options: ArenaOptions = {}): Promise<Arena | nul
  *
  * The writers (onboarding, the targets editor, a weigh-in) all publish as
  * they save, so this normally finds nothing to do and costs one comparison.
- * Adding or removing a monthly goal is the one change that leans on it: the
- * Goals board refreshes the page as it saves, and this republishes the card
- * with the goal folded in on that very load.
  * It exists because a rival scores my days from these three numbers: if a
  * write path is ever missed, their scoreboard quietly drifts from mine, and
  * a self-healing read is a much better answer than a discrepancy nobody can

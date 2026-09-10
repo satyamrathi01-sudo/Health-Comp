@@ -1,13 +1,13 @@
 import Link from "next/link";
-import { latestWeight, mine, requireArena } from "@/lib/data";
+import { mine, requireArena } from "@/lib/data";
 import { MAX_BASE_SCORE } from "@/lib/scoring";
-import { goalProgress } from "@/lib/goals";
 import { breachedLimits } from "@/lib/limits";
 import { buildPace } from "@/lib/progress";
 import { waterCeilingMl, waterTarget } from "@/lib/hydration";
 import { localHour } from "@/lib/calc";
 import { DataRow, EmptyState, Metric, PageHeader, Ring, Section, StreakBadge } from "@/components/ui";
 import Disclosure from "@/components/Disclosure";
+import SubTabs from "@/components/SubTabs";
 import AdviceCard from "@/components/AdviceCard";
 import SleepCard from "@/components/SleepCard";
 import RecoveryCard from "@/components/RecoveryCard";
@@ -16,7 +16,6 @@ import TodayTimeline from "@/components/TodayTimeline";
 import LimitAlerts from "@/components/LimitAlerts";
 import PlanProgress from "@/components/PlanProgress";
 import WaterBottle from "@/components/WaterBottle";
-import GoalProgress from "@/components/GoalProgress";
 
 export const dynamic = "force-dynamic";
 
@@ -30,10 +29,13 @@ const YOU = "var(--color-lime-glow)";
  * A dashboard that opens with someone else's number is a dashboard about
  * someone else.
  *
- * The challenge switcher went with them. Nothing here depends on which
- * challenge you are looking at any more, and a control that changes nothing
- * you can see is worse than no control at all. It lives on Versus, where
- * switching actually changes the screen.
+ * Three tabs rather than one long scroll: Score (the number and what made
+ * it), Log (what went in today) and Body (plan, recovery, sleep). Anything
+ * already over a limit sits above the tabs — a warning you have to go
+ * looking for is not a warning.
+ *
+ * No challenge switcher: nothing here depends on which challenge you are
+ * looking at. It lives on Versus.
  */
 export default async function TodayPage() {
   const arena = await requireArena({ days: 30 });
@@ -72,41 +74,13 @@ export default async function TodayPage() {
 
   const pace = targets ? buildPace({ days: arena.days, totals: me.totals, targets, today }) : null;
 
-  // My own goals, and how far along they are this month.
-  const monthStart = today.slice(0, 8) + "01";
-  const monthDays = arena.days.filter((d) => d >= monthStart);
-  const myGoals = arena.goals.filter((g) => g.user_id === arena.me.id);
-
-  const monthTotals = monthDays
-    .map((d) => me.totals.get(d))
-    .filter((t): t is NonNullable<typeof t> => Boolean(t));
-  const monthScores = monthDays
-    .map((d) => me.scores.get(d))
-    .filter((s) => s?.logged)
-    .map((s) => s!.total);
-
-  const progressByGoal: Record<string, number | null> = {};
-  for (const goal of myGoals) {
-    progressByGoal[goal.id] = goalProgress({
-      metric: goal.metric,
-      totals: monthTotals,
-      scores: monthScores,
-      latestWeight: latestWeight(arena),
-    });
-  }
-
   const prettyToday = new Date(today + "T00:00:00").toLocaleDateString("en-GB", {
     weekday: "long", day: "numeric", month: "long",
   });
 
-  return (
-    <div className="rise space-y-8">
-      <PageHeader title="Today" subtitle={prettyToday} right={<StreakBadge days={me.streak} />} />
-
-      {/* ---------- what you have already blown ---------- */}
-      <LimitAlerts limits={limits} />
-
-      {/* ---------- the one number that matters ---------- */}
+  /* ---------------- Score: the number, and what made it ---------------- */
+  const scoreTab = (
+    <>
       <section className="flex flex-col items-center">
         <Ring value={score.total} max={MAX_BASE_SCORE} label="today's score" />
 
@@ -120,13 +94,67 @@ export default async function TodayPage() {
         </div>
       </section>
 
-      {/* ---------- forward or back, day by day ---------- */}
+      <Section title="How you scored">
+        <div className="surface px-5">
+          {score.lines.map((line, i) => (
+            <div key={line.key} className={i > 0 ? "hair" : ""}>
+              <DataRow
+                label={line.label}
+                value={`${line.points}/${line.max}`}
+                sub={line.detail}
+                color={line.points > 0 ? (line.key === "streak" ? "var(--color-gold)" : YOU) : undefined}
+                bar={line.max > 0 ? line.points / line.max : 0}
+              />
+            </div>
+          ))}
+        </div>
+      </Section>
+
+      <Section title="Tips for tomorrow">
+        <AdviceCard hasData={hasData} />
+      </Section>
+    </>
+  );
+
+  /* ---------------- Log: what went in today ---------------- */
+  const logTab = (
+    <>
+      <Section
+        title="Logged today"
+        action={<Link href="/log" className="text-xs font-semibold text-lime-glow">Add</Link>}
+      >
+        {arena.todayFood.length + arena.todayWorkouts.length === 0 ? (
+          <EmptyState icon="○" title="Nothing logged yet" body="Tap + to add a meal or a workout." />
+        ) : (
+          <TodayTimeline foods={arena.todayFood} workouts={arena.todayWorkouts} />
+        )}
+      </Section>
+
+      <Section title="Water">
+        <WaterBottle target={water} drankMl={totals?.water_ml ?? 0} hour={hour} today={today} />
+      </Section>
+
+      <section className="surface px-5">
+        <Disclosure label="Vitamins & minerals">
+          <div className="pb-2">
+            <MicroPanel totals={totals} sex={arena.me.sex} context={microContext} />
+          </div>
+        </Disclosure>
+      </section>
+    </>
+  );
+
+  /* ---------------- Body: plan, recovery, sleep ---------------- */
+  const bodyTab = (
+    <>
       {pace && (
         <Section
-          title={pace.hasPlan ? "Your plan" : "Last two weeks"}
+          title={pace.hasPlan ? "Weight plan" : "Last two weeks"}
           action={
             !pace.hasPlan ? (
-              <Link href="/goals" className="text-xs font-semibold text-lime-glow">Set a target</Link>
+              <Link href="/goals?tab=edit" className="text-xs font-semibold text-lime-glow">
+                Set a goal
+              </Link>
             ) : undefined
           }
         >
@@ -134,76 +162,36 @@ export default async function TodayPage() {
         </Section>
       )}
 
-      {/* ---------- water ---------- */}
-      <Section title="Hydration">
-        <WaterBottle
-          target={water}
-          drankMl={totals?.water_ml ?? 0}
-          hour={hour}
-          today={today}
+      <Section title="Recovery">
+        <RecoveryCard recovery={me.recovery} />
+      </Section>
+
+      <Section title="Sleep">
+        <SleepCard
+          userId={arena.me.id}
+          date={today}
+          hours={totals?.sleep_hours ?? null}
+          quality={totals?.sleep_quality ?? null}
         />
       </Section>
+    </>
+  );
 
-      {/* ---------- how ready you are ---------- */}
-      <RecoveryCard recovery={me.recovery} />
+  return (
+    <div className="rise space-y-6">
+      <PageHeader title="Today" subtitle={prettyToday} right={<StreakBadge days={me.streak} />} />
 
-      {/* ---------- what you said you wanted ---------- */}
-      <Section
-        title="This month"
-        action={<Link href="/goals" className="text-xs font-semibold text-lime-glow">All goals</Link>}
-      >
-        <GoalProgress goals={myGoals} progress={progressByGoal} />
-      </Section>
+      {/* ---------- what you have already gone over ---------- */}
+      <LimitAlerts limits={limits} />
 
-      {/* ---------- what to do about it ---------- */}
-      <Section title="For tomorrow">
-        <AdviceCard hasData={hasData} />
-      </Section>
-
-      {/* ---------- sleep ---------- */}
-      <SleepCard
-        userId={arena.me.id}
-        date={today}
-        hours={totals?.sleep_hours ?? null}
-        quality={totals?.sleep_quality ?? null}
+      <SubTabs
+        label="Today"
+        tabs={[
+          { id: "score", label: "Score", content: scoreTab },
+          { id: "log", label: "Log", content: logTab },
+          { id: "body", label: "Body", content: bodyTab },
+        ]}
       />
-
-      {/* ---------- detail, folded away ---------- */}
-      <section className="surface px-5">
-        <Disclosure label="How the score broke down">
-          <div className="pb-2">
-            {score.lines.map((line) => (
-              <DataRow
-                key={line.key}
-                label={line.label}
-                value={`${line.points}/${line.max}`}
-                sub={line.detail}
-                color={line.points > 0 ? (line.key === "streak" ? "var(--color-gold)" : YOU) : undefined}
-                bar={line.max > 0 ? line.points / line.max : 0}
-              />
-            ))}
-          </div>
-        </Disclosure>
-        <div className="hair">
-          <Disclosure label="Micronutrients">
-            <div className="pb-2">
-              <MicroPanel totals={totals} sex={arena.me.sex} context={microContext} />
-            </div>
-          </Disclosure>
-        </div>
-      </section>
-
-      {/* ---------- the log ---------- */}
-      <Section
-        title="Logged today"
-        action={<Link href="/log" className="text-xs font-semibold text-lime-glow">Add</Link>}
-      >
-        {arena.todayFood.length + arena.todayWorkouts.length === 0 ? (
-          <EmptyState icon="○" title="Nothing logged yet" />
-        ) : (
-          <TodayTimeline foods={arena.todayFood} workouts={arena.todayWorkouts} />
-        )}
-      </Section>
     </div>
   );
 }

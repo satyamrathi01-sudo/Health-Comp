@@ -513,9 +513,9 @@ Give three to five pointers for TOMORROW. Rules:
 - Micronutrients are worth a point only when notably low against the stated target, and
   only with a real food fix (iron -> ragi, dates, spinach with lemon; B12 -> curd, milk,
   eggs; vitamin D -> sunlight or a supplement conversation).
-- THEIR GOALS COME FIRST. If a goal is stated below, every pointer should serve it. A
-  person chasing 150 g of protein wants protein pointers; someone chasing 20 training
-  days wants to be told to train. Do not push a generic priority over a stated goal.
+- THEIR PLAN COMES FIRST. If a target weight and date are stated below, every pointer
+  should serve that plan: someone cutting towards a date wants to hear about the deficit
+  and protein, not a generic priority.
 - Quantify each pointer with the component and amount fields so the app can price it: "add 150 g
   of paneer" is component "protein", amount 30. "Walk 30 minutes" is component "minutes",
   amount 30 (use "burn" with a kcal amount instead if you mean the energy). "Cut the

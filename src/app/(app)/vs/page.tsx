@@ -6,6 +6,8 @@ import ChallengeSwitcher from "@/components/ChallengeSwitcher";
 import ProteinVersus from "@/components/ProteinVersus";
 import ScoreGap from "@/components/ScoreGap";
 import DayVersus from "@/components/DayVersus";
+import RivalChips from "@/components/RivalChips";
+import SubTabs from "@/components/SubTabs";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Versus · FitClash" };
@@ -13,7 +15,14 @@ export const metadata = { title: "Versus · FitClash" };
 const YOU = "var(--color-lime-glow)";
 const THEM = "var(--color-flame)";
 
-
+/**
+ * You against whoever you are comparing with.
+ *
+ * Who is winning — the standing, and with several rivals who you are looking
+ * at — stays above the tabs. Below them, Today explains today and Past days
+ * is the list of every day. The open tab rides along in ?tab=, so picking a
+ * different rival keeps you on the tab you were reading.
+ */
 export default async function VersusPage({
   searchParams,
 }: {
@@ -22,33 +31,30 @@ export default async function VersusPage({
   const { vs } = await searchParams;
   // foodDays: 1 — this screen compares today and only today, so there is no
   // reason to ship a fortnight of items it will never read. The full
-  // fortnight lives one tap away on /vs/[id].
+  // head-to-head lives one tap away on /vs/[id].
   const arena = await requireArena({ days: 30, foodDays: 1 });
 
   const me = mine(arena);
   const others = rivals(arena);
-  // Whoever the ?vs= chip selected, falling back to the rival currently
-  // ahead. In a challenge with several people this screen used to be stuck
-  // on the leader, which is the one person you can already see is winning.
+  // Whoever the chip selected, falling back to the rival currently ahead. In
+  // a challenge with several people this screen used to be stuck on the
+  // leader, which is the one person you can already see is winning.
   const them = others.find((p) => p.profile.id === vs) ?? rival(arena);
+
+  const switcher = arena.myChallenges.length > 1 && (
+    <ChallengeSwitcher challenges={arena.myChallenges} activeId={arena.challenge?.id ?? null} />
+  );
+  const count = <PlayingCount count={arena.playersEnrolled} />;
 
   if (!them) {
     return (
-      <div className="rise">
-        <PageHeader
-          title="Versus"
-          subtitle="Nobody to beat yet"
-          right={<PlayingCount count={arena.playersEnrolled} />}
-        />
-        {arena.myChallenges.length > 1 && (
-          <div className="mb-6">
-            <ChallengeSwitcher challenges={arena.myChallenges} activeId={arena.challenge?.id ?? null} />
-          </div>
-        )}
+      <div className="rise space-y-6">
+        <PageHeader title="Versus" subtitle="No rival yet" right={count} />
+        {switcher}
         <EmptyState
           icon="○"
-          title="Your rival hasn't joined"
-          body="Share the invite code from the Me tab. Once they're in, every day becomes a fixture."
+          title="Your rival hasn't joined yet"
+          body="Share your invite code from the Me tab. Once they join, you'll see who wins each day."
         />
       </div>
     );
@@ -67,13 +73,9 @@ export default async function VersusPage({
   const todayMine = me.scores.get(arena.today)!;
   const todayTheirs = them.scores.get(arena.today)!;
 
-  // Always today, including when today is empty.
-  //
-  // This used to widen to a fortnight whenever the two of you had not BOTH
-  // logged, which meant every morning opened on a two-week total under a
-  // headline that read like a live standing — and logging your own breakfast
-  // did not clear it, because it was still waiting on the other person. A
-  // card about today should start the day empty and fill as you eat.
+  // Always today, including when today is empty. A card about today should
+  // start the day empty and fill as you eat, not widen to a fortnight that
+  // reads like a live standing.
   const protein = compareProtein({
     mineItems: itemsFor(arena, arena.me.id, arena.today),
     theirItems: itemsFor(arena, them.profile.id, arena.today),
@@ -86,19 +88,59 @@ export default async function VersusPage({
 
   const subtitle = arena.challenge ? arena.challenge.name : "Last 30 days";
 
-  return (
-    <div className="rise space-y-8">
-      <PageHeader
-        title="Versus"
-        subtitle={subtitle}
-        right={<PlayingCount count={arena.playersEnrolled} />}
-      />
+  /* ---------------- Today ---------------- */
+  const todayTab = (
+    <>
+      <Section title="Today's score">
+        <ScoreGap mine={todayMine} theirs={todayTheirs} theirName={firstName} compact />
+      </Section>
 
-      {arena.myChallenges.length > 1 && (
-        <ChallengeSwitcher challenges={arena.myChallenges} activeId={arena.challenge?.id ?? null} />
+      <Section
+        title={`Protein · you vs ${firstName}`}
+        action={
+          <Link href={`/vs/${them.profile.id}`} className="text-xs font-semibold text-lime-glow">
+            More detail
+          </Link>
+        }
+      >
+        <ProteinVersus comparison={protein} theirName={firstName} scope="Today" />
+      </Section>
+    </>
+  );
+
+  /* ---------------- Past days ---------------- */
+  const daysTab = (
+    <Section
+      title={others.length > 1 ? `Each day vs ${firstName}` : "Each day"}
+      action={<span className="text-[0.65rem] text-mist-600">tap a day to open it</span>}
+    >
+      {days.length === 0 ? (
+        <EmptyState icon="○" title="Nothing logged yet" body="The first one to log takes the lead." />
+      ) : (
+        <div className="surface px-5">
+          {days.map((day, i) => (
+            <DayVersus
+              key={day}
+              day={day}
+              mine={me.scores.get(day)!}
+              theirs={them.scores.get(day)!}
+              isToday={day === arena.today}
+              first={i === 0}
+              rivalId={them.profile.id}
+            />
+          ))}
+        </div>
       )}
+    </Section>
+  );
 
-      {/* ---------- the standing ---------- */}
+  return (
+    <div className="rise space-y-6">
+      <PageHeader title="Versus" subtitle={subtitle} right={count} />
+
+      {switcher}
+
+      {/* ---------- who is winning ---------- */}
       {others.length === 1 ? (
         <section className="flex items-start justify-between">
           <Side player={me} color={YOU} align="left" label="You" />
@@ -110,7 +152,7 @@ export default async function VersusPage({
               <span className="hero-num tnum text-4xl" style={{ color: THEM }}>{them.wins}</span>
             </div>
             {me.ties > 0 && (
-              <div className="tnum mt-1.5 text-[0.65rem] text-mist-600">{me.ties} drawn</div>
+              <div className="tnum mt-1.5 text-[0.65rem] text-mist-600">{me.ties} tied</div>
             )}
           </div>
           <Link href={`/vs/${them.profile.id}`}>
@@ -158,80 +200,34 @@ export default async function VersusPage({
               })}
           </div>
           <p className="mt-2 px-1 text-[0.65rem] leading-relaxed text-mist-600">
-            Tap anyone for the head-to-head. You created this challenge, so you see
-            everyone — each of them sees only their own numbers against yours.
+            Tap a name to compare. You started this challenge, so you see everyone; each of
+            them only sees you.
           </p>
         </Section>
       )}
 
       {others.length > 1 && (
-        <nav className="-mx-1 flex gap-2 overflow-x-auto px-1 pb-1">
-          {others.map((p) => {
-            const active = p.profile.id === them.profile.id;
-            return (
-              <Link
-                key={p.profile.id}
-                href={active ? "/vs" : `/vs?vs=${p.profile.id}`}
-                scroll={false}
-                aria-current={active ? "true" : undefined}
-                className={`flex shrink-0 items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-semibold ${
-                  active ? "bg-lime-glow text-ink-900" : "surface text-mist-200"
-                }`}
-              >
-                <span aria-hidden="true">{p.profile.avatar_emoji}</span>
-                {p.profile.display_name.split(" ")[0]}
-              </Link>
-            );
-          })}
-        </nav>
+        <RivalChips
+          rivals={others.map((p) => ({
+            id: p.profile.id,
+            name: p.profile.display_name.split(" ")[0],
+            emoji: p.profile.avatar_emoji,
+          }))}
+          activeId={them.profile.id}
+        />
       )}
 
-      {/* ---------- the point of the whole screen ---------- */}
-      <Section
-        title={`Protein · you vs ${firstName}`}
-        action={
-          <Link href={`/vs/${them.profile.id}`} className="text-xs font-semibold text-lime-glow">
-            Full analysis
-          </Link>
-        }
-      >
-        <ProteinVersus comparison={protein} theirName={firstName} scope="Today" />
-      </Section>
-
-      {/* ---------- why today looks the way it does ---------- */}
-      {(todayMine.logged || todayTheirs.logged) && (
-        <Section title="Today, line by line">
-          <ScoreGap mine={todayMine} theirs={todayTheirs} theirName={firstName} compact />
-        </Section>
-      )}
-
-      {/* ---------- fixtures ---------- */}
-      <Section
-        title={others.length > 1 ? `Day by day · vs ${firstName}` : "Day by day"}
-        action={<span className="text-[0.65rem] text-mist-600">tap a day</span>}
-      >
-        {days.length === 0 ? (
-          <EmptyState icon="○" title="Nothing logged yet" body="First one to log takes the lead." />
-        ) : (
-          <div className="surface px-5">
-            {days.map((day, i) => (
-              <DayVersus
-                key={day}
-                day={day}
-                mine={me.scores.get(day)!}
-                theirs={them.scores.get(day)!}
-                isToday={day === arena.today}
-                first={i === 0}
-                rivalId={them.profile.id}
-              />
-            ))}
-          </div>
-        )}
-      </Section>
+      <SubTabs
+        label="Versus"
+        tabs={[
+          { id: "today", label: "Today", content: todayTab },
+          { id: "days", label: "Past days", content: daysTab },
+        ]}
+      />
 
       <p className="px-1 text-[0.62rem] leading-relaxed text-mist-600">
-        Everyone is scored against their own targets, so these numbers compare effort
-        rather than bodies. Height, weight and age stay private to each player.
+        Everyone is scored against their own targets, so this compares effort, not body
+        size. Height, weight and age stay private.
       </p>
     </div>
   );

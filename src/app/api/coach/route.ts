@@ -3,7 +3,7 @@ import { NextResponse } from "next/server";
 import { createClient, supabaseConfigured } from "@/lib/supabase/server";
 import { generateAdvice, GeminiError } from "@/lib/gemini";
 import {
-  addDays, applyGoalsToTargets, daysInMonthOf, deriveTargets, localDate, localHour,
+  addDays, deriveTargets, localDate, localHour,
   MICRO_REFS, microTarget, prettyDate, type WeightPlan,
 } from "@/lib/calc";
 import { breachedLimits } from "@/lib/limits";
@@ -11,7 +11,7 @@ import { hydration, litres, waterCeilingMl, waterTarget } from "@/lib/hydration"
 import { projectedGain, scoreDay, type ScoreTargets } from "@/lib/scoring";
 import { computeRecovery } from "@/lib/recovery";
 import { getMyProfile } from "@/lib/data";
-import type { AdvicePoint, DailyTotals, MonthlyGoal, Profile } from "@/lib/types";
+import type { AdvicePoint, DailyTotals, Profile } from "@/lib/types";
 
 export const runtime = "nodejs";
 
@@ -20,7 +20,6 @@ function briefing(
   profile: Profile,
   today: DailyTotals | null,
   week: DailyTotals[],
-  goals: MonthlyGoal[],
   targets: ScoreTargets | null,
   plan: WeightPlan | null,
   breaches: ReturnType<typeof breachedLimits>,
@@ -105,20 +104,6 @@ function briefing(
     );
   }
 
-  const active = goals.filter((g) => !g.done);
-  if (active.length) {
-    lines.push("", "THEIR GOALS THIS MONTH — these take priority over anything else:");
-    for (const g of active) {
-      lines.push(
-        g.target_value !== null
-          ? `  - ${g.title} (target ${g.target_value}, tracked as ${g.metric})`
-          : `  - ${g.title}`,
-      );
-    }
-  } else {
-    lines.push("", "They have set no goals this month.");
-  }
-
   return lines.filter((l, i) => l !== "" || lines[i - 1] !== "").join("\n");
 }
 
@@ -150,35 +135,28 @@ export async function POST(request: Request) {
 
   const today = localDate(profile.timezone);
   const fromDate = addDays(today, -6);
-  const monthStart = today.slice(0, 8) + "01";
 
-  // Three independent reads. They only need the timezone from the profile, so
+  // Two independent reads. They only need the timezone from the profile, so
   // they go together rather than one after another — on a function talking to
   // Supabase across a region, sequencing these was most of the wait.
-  const [{ data: rows }, { data: goalRows }, { data: existing }] = await Promise.all([
+  const [{ data: rows }, { data: existing }] = await Promise.all([
     supabase.from("daily_totals").select("*")
       .eq("user_id", profile.id).gte("local_date", fromDate).lte("local_date", today),
-    supabase.from("monthly_goals").select("*")
-      .eq("user_id", profile.id).eq("month", monthStart),
     supabase.from("daily_advice").select("*")
       .eq("user_id", profile.id).eq("local_date", today).maybeSingle(),
   ]);
 
   const week = (rows ?? []) as DailyTotals[];
   const todayTotals = week.find((d) => d.local_date === today) ?? null;
-  const goals = (goalRows ?? []) as MonthlyGoal[];
 
-  // Goals override the derived targets where they overlap, so the coach and
-  // the score are working from the same numbers.
+  // The same derivation the score uses, so the coach and the scoreboard are
+  // working from the same numbers.
   const derived = deriveTargets(profile, today);
-  const adjusted = derived
-    ? applyGoalsToTargets(derived, goals, daysInMonthOf(today))
-    : null;
-  const targets: ScoreTargets | null = adjusted
+  const targets: ScoreTargets | null = derived
     ? {
-        burnTarget: adjusted.burnTarget,
-        proteinTarget: adjusted.proteinTarget,
-        kcalTarget: adjusted.kcalTarget,
+        burnTarget: derived.burnTarget,
+        proteinTarget: derived.proteinTarget,
+        kcalTarget: derived.kcalTarget,
       }
     : null;
 
@@ -220,9 +198,9 @@ export async function POST(request: Request) {
   const breaches = breachedLimits(
     todayTotals,
     profile.sex,
-    adjusted
+    derived
       ? {
-          ...adjusted,
+          ...derived,
           weightKg: profile.weight_kg,
           waterCeilingMl: waterCeilingMl(waterTarget(profile, todayTotals)),
         }
@@ -231,8 +209,8 @@ export async function POST(request: Request) {
 
   const text =
     briefing(
-      profile, todayTotals, week, goals, targets,
-      adjusted?.plan ?? null, breaches, water, adjusted,
+      profile, todayTotals, week, targets,
+      derived?.plan ?? null, breaches, water, derived,
     ) +
     (recovery.score === null
       ? "\n\nRECOVERY: unknown, no sleep logged."

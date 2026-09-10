@@ -73,7 +73,7 @@ export default async function DayDetailPage({
         title={label}
         subtitle={`You vs ${firstName}`}
         right={
-          <Link href={`/vs/${id}`} className="text-xs font-semibold text-lime-glow">
+          <Link href={`/vs/${id}?tab=days`} className="text-xs font-semibold text-lime-glow">
             Back
           </Link>
         }
@@ -97,9 +97,8 @@ export default async function DayDetailPage({
 
       {noDetail && (
         <p className="surface px-5 py-4 text-xs leading-relaxed text-mist-600">
-          The item-by-item breakdown needs get_day_detail, which this database
-          does not have yet. Run supabase/schema.sql to turn it on. The scores
-          below are unaffected — they come from the daily totals.
+          Item-by-item details aren&apos;t switched on for this database yet. Run
+          supabase/schema.sql to add them. The scores below are still correct.
         </p>
       )}
 
@@ -158,7 +157,7 @@ export default async function DayDetailPage({
         />
       </Anchored>
 
-      <Anchored id="micros" title="Micronutrients" line={lineFor("micros")}>
+      <Anchored id="micros" title="Vitamins & minerals" line={lineFor("micros")}>
         <MicroTable
           mine={myTotals}
           theirs={theirTotals}
@@ -188,9 +187,8 @@ export default async function DayDetailPage({
       </Section>
 
       <p className="px-1 text-[0.62rem] leading-relaxed text-mist-600">
-        Every line is each of you against your own target. {firstName}&apos;s height,
-        weight, age and weigh-ins stay private — what you see here is what they ate
-        and did, not the body it was measured against.
+        Each of you is scored against your own targets. {firstName}&apos;s height, weight,
+        age and weigh-ins stay private — you only see what they ate and did.
       </p>
     </div>
   );
@@ -236,7 +234,7 @@ function CeilingTable({
   theirName: string;
 }) {
   if (myCeilings.length === 0 && theirCeilings.length === 0) {
-    return <Empty>Ceilings need a published calorie target.</Empty>;
+    return <Empty>This needs a calorie target first.</Empty>;
   }
   const value = (t: DailyTotals | null, key: string) =>
     t ? Number((t as unknown as Record<string, unknown>)[key] ?? 0) : 0;
@@ -273,7 +271,7 @@ function MicroTable({
   theirAims: { key: string; label: string; atRest: number; perSweat: number; maxSweatAdd: number }[];
   theirName: string;
 }) {
-  if (myAims.length === 0) return <Empty>Micronutrient aims have not been published yet.</Empty>;
+  if (myAims.length === 0) return <Empty>No vitamin and mineral targets yet.</Empty>;
 
   const value = (t: DailyTotals | null, key: string) =>
     t ? Number((t as unknown as Record<string, unknown>)[key] ?? 0) : 0;

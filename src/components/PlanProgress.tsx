@@ -54,7 +54,7 @@ export default function PlanProgress({
         <p className="mt-1 text-[0.7rem] leading-relaxed text-mist-600">
           {plan
             ? `${plan.direction === "lose" ? "Down" : "Up"} to ${plan.targetKg} kg by ${prettyDate(plan.targetDate)} · ${plan.kgToGo} kg to go`
-            : "Set a target weight and a date on the Goals tab to walk a real plan."}
+            : "Set a target weight and date in Goals to follow a plan."}
         </p>
       </div>
 
@@ -134,7 +134,7 @@ export default function PlanProgress({
             <span className="text-mist-600"> of {Math.round(goalKg * 10) / 10} kg</span>
           </span>
           <span className="tnum text-[0.65rem] text-mist-600">
-            pace marker at {pace.expectedKg} kg
+            aim by now: {pace.expectedKg} kg
           </span>
         </div>
 

@@ -204,9 +204,9 @@ function bestSwap(
           gainG: gain,
           shareOfGap: gapG > 0 ? Math.min(1, gain / gapG) : 0,
           text:
-            `Their ${to.name.toLowerCase()} carries ${to.density} g of protein per 100 kcal; ` +
-            `your ${from.name.toLowerCase()} carries ${from.density}. Spending the same ` +
-            `${from.kcal} kcal on ${to.name.toLowerCase()} instead would have added about ` +
+            `Their ${to.name.toLowerCase()} has ${to.density} g of protein per 100 kcal; ` +
+            `your ${from.name.toLowerCase()} has ${from.density}. Swapping your ` +
+            `${from.kcal} kcal of ${from.name.toLowerCase()} for ${to.name.toLowerCase()} would add about ` +
             `${gain} g — ${Math.round(Math.min(1, gain / gapG) * 100)}% of the gap to ${theirName}.`,
         };
       }
@@ -239,27 +239,27 @@ function explainFor(o: {
   name: string;
   swap: ProteinSwap | null;
 }): string {
-  if (o.empty) return "The moment either of you logs a meal, this breaks the difference down food by food.";
-  if (Math.abs(o.gapG) < MIN_MEANINGFUL_G) return "Neither of you is getting protein from anywhere the other is not.";
+  if (o.empty) return "Once either of you logs a meal, you'll see where the protein came from.";
+  if (Math.abs(o.gapG) < MIN_MEANINGFUL_G) return "Neither of you is ahead on protein today.";
 
   if (o.gapG < 0) {
     const top = o.myEdge[0];
     return top
-      ? `Your ${top.name.toLowerCase()} is doing the work — ${Math.abs(top.delta)} g more than ${o.name} got from it.`
-      : `You are ahead on protein across the board.`;
+      ? `Your ${top.name.toLowerCase()} made the difference — ${Math.abs(top.delta)} g more than ${o.name} got from it.`
+      : `You ate more protein across the whole day.`;
   }
 
   const top = o.theirEdge[0];
-  if (!top) return `${o.name} is ahead on volume rather than on any one food.`;
+  if (!top) return `${o.name} ate more protein overall, not from one food.`;
 
   const share = Math.round(Math.min(1, top.delta / o.gapG) * 100);
   const theirs =
     top.mine > 0
-      ? `${top.theirs} g against your ${top.mine} g`
+      ? `${top.theirs} g vs your ${top.mine} g`
       : `${top.theirs} g, and you had none`;
 
   return (
-    `${o.name}'s ${top.name.toLowerCase()} is ${share}% of the difference — ${theirs}. ` +
-    (o.swap ? o.swap.text : `Matching that one item would put you level.`)
+    `${o.name}'s ${top.name.toLowerCase()} is ${share}% of the difference (${theirs}). ` +
+    (o.swap ? o.swap.text : `Eating the same would put you level.`)
   );
 }

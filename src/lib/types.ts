@@ -288,16 +288,6 @@ export interface Challenge {
   created_at: string;
 }
 
-export interface MonthlyGoal {
-  id: string;
-  user_id: string;
-  month: string;
-  title: string;
-  metric: "weight_kg" | "avg_protein_g" | "total_kcal_burned" | "workout_days" | "avg_score" | "custom";
-  target_value: number | null;
-  done: boolean;
-}
-
 /** A fully-zeroed day. One definition, so widening DailyTotals cannot
  *  silently leave a hand-written literal behind. */
 export function emptyDailyTotals(user_id: string, local_date: string): DailyTotals {
