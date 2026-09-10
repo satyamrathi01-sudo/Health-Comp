@@ -560,3 +560,102 @@ export async function generateAdvice(summary: string): Promise<AdviceResult> {
       })),
   };
 }
+
+/* ------------------------------- SWAPS ------------------------------ */
+
+/** The limits a swap can be about: the ones with food behind them. */
+export const SWAP_LIMIT_KEYS = ["kcal", "carbs_g", "fat_g", "sodium_mg", "sugar_g", "satfat_g"] as const;
+
+export interface SwapIdea {
+  limit: (typeof SWAP_LIMIT_KEYS)[number];
+  instead_of: string;
+  have: string;
+  /** Roughly how much of that limit's nutrient the swap removes, in its unit. */
+  saves: number;
+  why: string;
+}
+
+const SWAP_SCHEMA: SchemaNode = {
+  type: "OBJECT",
+  properties: {
+    swaps: {
+      type: "ARRAY",
+      description: "Up to three swaps per nutrient, biggest saving first",
+      items: {
+        type: "OBJECT",
+        properties: {
+          limit: {
+            type: "STRING",
+            enum: [...SWAP_LIMIT_KEYS],
+            description: "The nutrient key exactly as given, e.g. fat_g",
+          },
+          instead_of: {
+            type: "STRING",
+            description: "The food they ate, named as it appears in the list",
+          },
+          have: {
+            type: "STRING",
+            description: "An ordinary alternative with a realistic portion",
+          },
+          saves: {
+            type: "NUMBER",
+            description: "Roughly how much of THIS nutrient the swap removes, in its unit",
+          },
+          why: { type: "STRING", description: "One short phrase, max ~70 characters" },
+        },
+        required: ["limit", "instead_of", "have", "saves", "why"],
+      },
+    },
+  },
+  required: ["swaps"],
+};
+
+const SWAP_PROMPT = `You suggest food swaps for someone in India who went over a daily nutrition
+limit. For each nutrient below you get the foods that supplied most of it today, and how
+much each supplied.
+
+Suggest up to three swaps per nutrient, biggest saving first. Rules:
+
+- "instead_of" must be one of the listed foods, named as it appears. When a meal is listed
+  as a whole, pick the food in it most likely responsible: papad, pickle or namkeen for
+  sodium; a sweet, sugary chai or a soft drink for sugar; ghee, butter, cream or fried food
+  for saturated fat.
+- "have" is an ordinary alternative from an Indian kitchen with a realistic portion:
+  "2 phulka without ghee", "chicken tikka", "a bowl of roasted makhana". Prefer a lighter
+  version of the same dish or a close substitute over simply skipping it.
+- "saves" is roughly how much of that nutrient the swap removes, in the unit shown, for the
+  portion they actually ate. Be conservative, and never more than the food itself supplied.
+- "why" is one short phrase.
+- General food advice only: no medical claims, no emoji, no exclamation marks.
+
+Return only JSON matching the schema.`;
+
+/**
+ * "Instead of this, have that" for the foods behind each limit that went
+ * over. The brief comes from swapBrief() in overage.ts and carries food only.
+ */
+export async function generateSwaps(brief: string): Promise<SwapIdea[]> {
+  const raw = await generate<{ swaps?: Partial<SwapIdea>[] }>(SWAP_PROMPT, brief, SWAP_SCHEMA);
+  const perLimit = new Map<string, number>();
+  const out: SwapIdea[] = [];
+
+  for (const s of raw.swaps ?? []) {
+    const limit = SWAP_LIMIT_KEYS.find((k) => k === s?.limit);
+    if (!limit || !s?.instead_of || !s?.have) continue;
+
+    // Three per limit, however many the model returns.
+    const count = (perLimit.get(limit) ?? 0) + 1;
+    if (count > 3) continue;
+    perLimit.set(limit, count);
+
+    out.push({
+      limit,
+      instead_of: String(s.instead_of).slice(0, 80).trim(),
+      have: String(s.have).slice(0, 100).trim(),
+      saves: num(s.saves, 10000),
+      why: String(s.why ?? "").slice(0, 120).trim(),
+    });
+  }
+
+  return out;
+}

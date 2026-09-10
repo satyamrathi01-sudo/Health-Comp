@@ -175,6 +175,23 @@ comfortably inside its limit is not mentioned at all, so seeing this block means
 something. `src/lib/limits.ts` has the list; adding a tracked factor there is
 enough to have it watched.
 
+The warning is one line. Tap it and **`/limits`** opens each limit up:
+
+- **Where it came from** — today's foods, biggest first, with the same food
+  across meals added up. Calories, carbs and fat are known per food. Sodium,
+  sugar and saturated fat are only estimated per meal, so for those it names
+  meals rather than pretending to know which food it was.
+- **To stay under** — the fewest cuts that would have kept you inside the limit:
+  "skip the butter chicken, have half the parathas". Half is offered only when
+  half is enough on its own.
+- **Swap ideas** — "instead of butter chicken, have chicken tikka, saves about
+  25 g", with how much of the overshoot that covers.
+
+The first two are arithmetic over what you logged (`src/lib/overage.ts`). The
+swaps come from Gemini, load after the page, and are cached in `ai_cache` keyed
+on the foods alone — never on your limits, which follow from your body and would
+otherwise sit where every signed-in user can read them.
+
 ### Water
 
 A bottle on the Today tab that fills as the day goes on, with a wave at the
@@ -331,6 +348,7 @@ src/lib/scoring.ts    the scoreboard — all weights live here
 src/lib/calc.ts       BMR, BMI, targets, the weight plan, MET burn, local dates
 src/lib/versus.ts     why they are ahead on protein, food by food
 src/lib/limits.ts     every ceiling, in one list
+src/lib/overage.ts    what pushed a limit over, and the fewest cuts back under
 src/lib/progress.ts   the forward/back walk and the pace marker
 src/lib/hydration.ts  the water aim, the pace against the clock, the bottle
 src/lib/portions.ts   re-pricing a meal when you edit a portion

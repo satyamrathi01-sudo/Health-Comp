@@ -1,5 +1,6 @@
-import { MICRO_REFS, microTarget, type MicroContext } from "./calc.ts";
-import type { DailyTotals, Sex } from "./types.ts";
+import { MICRO_REFS, microTarget, type DerivedTargets, type MicroContext } from "./calc.ts";
+import { waterCeilingMl, waterTarget } from "./hydration.ts";
+import type { DailyTotals, Profile, Sex } from "./types.ts";
 
 /* =====================================================================
  * Ceilings.
@@ -92,15 +93,15 @@ export function trackedLimits(
   if (targets) {
     out.push(
       row("kcal", "Calories", "kcal", n(totals?.kcal_in), targets.kcalTarget,
-        "Your calorie target for today"),
+        "Set from your body and your weight goal"),
     );
     out.push(
       row("carbs_g", "Carbs", "g", n(totals?.carbs_g), targets.carbsTarget,
-        "Your daily carb limit"),
+        "What's left of your calories after protein and fat"),
     );
     out.push(
       row("fat_g", "Fat", "g", n(totals?.fat_g), targets.fatTarget,
-        "Your daily fat limit"),
+        "A set share of your calories for your goal"),
     );
     out.push(
       row("water_ml", "Water", "ml", n(totals?.water_ml), targets.waterCeilingMl ?? 0,
@@ -144,4 +145,25 @@ export function breachedLimits(
     // A day with no food must not report every food ceiling as "close".
     .filter((r) => totals.meals > 0 || r.key === "water_ml")
     .sort((a, b) => b.pct - a.pct);
+}
+
+/**
+ * Today's warnings for one person, computed the one way every screen uses.
+ *
+ * The banner on Today, the /limits page and the swap ideas all go through
+ * this, so the banner can never flag something the page cannot explain.
+ */
+export function todaysBreaches(
+  totals: DailyTotals | null,
+  profile: Pick<Profile, "sex" | "weight_kg" | "water_target_ml">,
+  targets: DerivedTargets | null,
+): TrackedLimit[] {
+  return breachedLimits(totals, profile.sex,
+    targets
+      ? {
+          ...targets,
+          weightKg: profile.weight_kg,
+          waterCeilingMl: waterCeilingMl(waterTarget(profile, totals)),
+        }
+      : null);
 }

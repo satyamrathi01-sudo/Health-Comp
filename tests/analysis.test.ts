@@ -572,5 +572,81 @@ check("no published target falls back to the flat hour",
     .lines.find((l) => l.key === "minutes")!.points, 10);
 
 
+/* ===================== what pushed a limit over ===================== */
+
+import { explainLimits, swapBrief } from "../src/lib/overage.ts";
+import type { TrackedLimit } from "../src/lib/limits.ts";
+import {
+  EMPTY_MICROS, type FoodItem, type FoodLog, type MealSlot, type Micros,
+} from "../src/lib/types.ts";
+
+const dish = (name: string, qty: number, unit: string, fat_g: number): FoodItem =>
+  ({ name, qty, unit, kcal: fat_g * 12, protein_g: 0, carbs_g: 0, fat_g, fiber_g: 0 });
+
+const meal = (slot: MealSlot, items: FoodItem[], micros: Partial<Micros> = {}): FoodLog => ({
+  id: slot, user_id: "u", local_date: TODAY, logged_at: "", meal_slot: slot, raw_text: "",
+  items, kcal: 0, protein_g: 0, carbs_g: 0, fat_g: 0, fiber_g: 0,
+  confidence: "medium", source: "ai", note: null, ...EMPTY_MICROS, ...micros,
+});
+
+// 120 g of fat against a 60 g limit, spread across the day.
+const heavyDay = [
+  meal("breakfast", [dish("Ghee paratha", 2, "piece", 24), dish("Chai", 1, "cup", 4)]),
+  meal("lunch", [dish("Butter chicken", 1, "bowl", 38), dish("Naan", 2, "piece", 12)], { sodium_mg: 1900 }),
+  meal("dinner", [dish("Paneer tikka", 1, "plate", 20), dish("Chai", 1, "cup", 4)], { sodium_mg: 900 }),
+  meal("snack", [dish("Samosa", 2, "piece", 18)]),
+];
+
+const fatOver: TrackedLimit = {
+  key: "fat_g", label: "Fat", unit: "g", value: 120, limit: 60, pct: 2, over: 60,
+  state: "over", why: "",
+};
+const [fat] = explainLimits([fatOver], heavyDay);
+check("fat is explained food by food", fat.granularity, "item");
+check("the biggest source comes first", fat.contributors[0].name, "Butter chicken");
+check("the same food across meals is added up",
+  fat.contributors.find((c) => c.name === "Chai")?.amount, 8);
+check("with its combined portion", fat.contributors.find((c) => c.name === "Chai")?.portion, "2 cup");
+check("and both meals it came from",
+  fat.contributors.find((c) => c.name === "Chai")?.meals, ["breakfast", "dinner"]);
+check("shares add up to the whole day",
+  Math.round(fat.contributors.reduce((a, c) => a + c.share, 0) * 100), 100);
+check("the plan skips the biggest sources until you are under",
+  fat.cuts.map((c) => [c.action, c.name, c.saves]),
+  [["skip", "Butter chicken", 38], ["skip", "Ghee paratha", 24]]);
+check("and that plan gets you under", fat.stillOver, 0);
+
+// Just over only needs half of the biggest source, not the whole thing.
+const [justOver] = explainLimits([{ ...fatOver, value: 70, pct: 70 / 60, over: 10 }], heavyDay);
+check("a small overage halves one food",
+  justOver.cuts, [{ name: "Butter chicken", action: "halve", saves: 19 }]);
+
+// Sodium is only known per meal, so meals are named — never invented foods.
+const [salt] = explainLimits([{
+  key: "sodium_mg", label: "Sodium", unit: "mg", value: 2800, limit: 2300, pct: 2800 / 2300,
+  over: 500, state: "over", why: "",
+}], heavyDay);
+check("sodium is explained meal by meal", salt.granularity, "meal");
+check("with the saltiest meal first", salt.contributors[0].name, "Lunch");
+check("listing the foods in it", salt.contributors[0].foods, ["Butter chicken", "Naan"]);
+check("and no made-up food-level cuts", salt.cuts.length, 0);
+
+check("water has no food to blame",
+  explainLimits([{ ...fatOver, key: "water_ml", label: "Water", unit: "ml" }], heavyDay)[0].granularity,
+  "none");
+
+const closeFat: TrackedLimit = { ...fatOver, value: 57, pct: 0.95, over: 0, state: "close" };
+check("a limit you are only close to gets no cuts", explainLimits([closeFat], heavyDay)[0].cuts.length, 0);
+
+// The swap prompt, which is cached where every user can read it.
+const brief = swapBrief([fat, salt]);
+check("the swap brief names the foods and the meals",
+  brief.includes("Butter chicken, 1 bowl: 38 g") && brief.includes("Lunch as a whole"), true);
+check("but carries nothing a body could be worked back from",
+  /limit|target|over|60/i.test(brief), false);
+check("and says nothing at all about a limit that is only close",
+  swapBrief(explainLimits([closeFat], heavyDay)), "");
+
+
 console.log(fails === 0 ? "\nAll analysis checks passed." : `\n${fails} FAILED`);
 process.exit(fails === 0 ? 0 : 1);

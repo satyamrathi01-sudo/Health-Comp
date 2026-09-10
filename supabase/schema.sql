@@ -1719,3 +1719,24 @@ end;
 $$;
 
 grant execute on function public.get_arena(integer, uuid, integer) to authenticated;
+
+-- =====================================================================
+-- v12 — swap ideas are cached like parses.
+--
+-- The limits page asks Gemini for "instead of this, have that" ideas for
+-- the foods that pushed a limit over. The same plate on another day, or on
+-- someone else's plate, should not cost another request, so the answers go
+-- in ai_cache under a new kind.
+--
+-- The cached text is food only — names, portions, and how much of a
+-- nutrient each supplied — never the person's limits, which are derived
+-- from their body. ai_cache is readable by every signed-in user, which is
+-- exactly why that line matters. See swapBrief() in src/lib/overage.ts.
+--
+-- Until this runs the cache rejects kind 'swap'. The app still shows the
+-- ideas; it just asks Gemini again each time.
+-- =====================================================================
+
+alter table public.ai_cache drop constraint if exists ai_cache_kind_check;
+alter table public.ai_cache
+  add constraint ai_cache_kind_check check (kind in ('food', 'workout', 'swap'));

@@ -1,9 +1,9 @@
 import Link from "next/link";
 import { mine, requireArena } from "@/lib/data";
 import { MAX_BASE_SCORE } from "@/lib/scoring";
-import { breachedLimits } from "@/lib/limits";
+import { todaysBreaches } from "@/lib/limits";
 import { buildPace } from "@/lib/progress";
-import { waterCeilingMl, waterTarget } from "@/lib/hydration";
+import { waterTarget } from "@/lib/hydration";
 import { localHour } from "@/lib/calc";
 import { DataRow, EmptyState, Metric, PageHeader, Ring, Section, StreakBadge } from "@/components/ui";
 import Disclosure from "@/components/Disclosure";
@@ -66,11 +66,9 @@ export default async function TodayPage() {
       }
     : undefined;
 
-  // Anything already past its ceiling, worst first. Straight to the top.
-  const limits = breachedLimits(totals, arena.me.sex,
-    targets
-      ? { ...targets, weightKg: arena.me.weight_kg, waterCeilingMl: waterCeilingMl(water) }
-      : null);
+  // Anything already past its ceiling, worst first. Straight to the top, as a
+  // single line that opens /limits — computed exactly as that page does.
+  const limits = todaysBreaches(totals, arena.me, targets);
 
   const pace = targets ? buildPace({ days: arena.days, totals: me.totals, targets, today }) : null;
 
