@@ -10,6 +10,8 @@ import Disclosure from "@/components/Disclosure";
 import SubTabs from "@/components/SubTabs";
 import AdviceCard from "@/components/AdviceCard";
 import CoachChat from "@/components/CoachChat";
+import ChallengePrompt from "@/components/ChallengePrompt";
+import { needsChallengePrompt } from "@/lib/clash";
 import SleepCard from "@/components/SleepCard";
 import RecoveryCard from "@/components/RecoveryCard";
 import MicroPanel from "@/components/MicroPanel";
@@ -195,6 +197,10 @@ export default async function TodayPage() {
           { id: "body", label: "Body", content: bodyTab },
         ]}
       />
+
+      {needsChallengePrompt(arena.myChallenges, arena.me.created_at, today) && (
+        <ChallengePrompt userId={arena.me.id} timezone={arena.me.timezone} />
+      )}
     </div>
   );
 }

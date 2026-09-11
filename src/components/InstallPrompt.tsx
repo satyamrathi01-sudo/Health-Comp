@@ -96,6 +96,8 @@ export default function InstallPrompt() {
       // Nothing to do: the sheet still closes.
     }
     setMode(null);
+    // Lets a sheet that waited for this one (ChallengePrompt) open now.
+    window.dispatchEvent(new Event("fitclash:sheet-closed"));
   }
 
   function install() {

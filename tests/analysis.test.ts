@@ -684,6 +684,31 @@ check("and only the most recent few", cleaned.length, CHAT_LIMITS.turns);
 check("ending with the latest turn", cleaned[cleaned.length - 1].text, "turn 9");
 check("history that is not a list is ignored", cleanHistory("nope"), []);
 
+/* ================= nudging back into a challenge ================= */
+
+import { inviteMessage, needsChallengePrompt, randomInviteCode, whatsappLink } from "../src/lib/clash.ts";
+
+const promptToday = "2026-09-11";
+const promptNow = Date.parse("2026-09-11T12:00:00Z");
+const oldAccount = "2026-08-01T09:00:00Z";
+
+check("someone in a running challenge is left alone",
+  needsChallengePrompt([{ end_date: "2026-10-01" }], oldAccount, promptToday, promptNow), false);
+check("a challenge ending today is still running",
+  needsChallengePrompt([{ end_date: promptToday }], oldAccount, promptToday, promptNow), false);
+check("a challenge that ended yesterday gets a day's grace",
+  needsChallengePrompt([{ end_date: "2026-09-10" }], oldAccount, promptToday, promptNow), false);
+check("two days after the last one ended, they are asked",
+  needsChallengePrompt([{ end_date: "2026-08-20" }, { end_date: "2026-09-09" }], oldAccount, promptToday, promptNow), true);
+check("an older account with no challenge at all is asked",
+  needsChallengePrompt([], oldAccount, promptToday, promptNow), true);
+check("an account under a day old is not",
+  needsChallengePrompt([], "2026-09-11T02:00:00Z", promptToday, promptNow), false);
+check("invite codes are six unambiguous characters",
+  /^[A-HJ-NP-Z2-9]{6}$/.test(randomInviteCode()), true);
+check("the WhatsApp link carries the whole invite",
+  decodeURIComponent(whatsappLink(inviteMessage("The 60-Day Clash", "AB23CD", "https://fitclash.app")).split("text=")[1]),
+  "Join me on FitClash 💪\n\nThe 60-Day Clash\nCode: AB23CD\n\nhttps://fitclash.app");
 
 console.log(fails === 0 ? "\nAll analysis checks passed." : `\n${fails} FAILED`);
 process.exit(fails === 0 ? 0 : 1);
