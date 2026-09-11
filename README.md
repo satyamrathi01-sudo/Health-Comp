@@ -334,6 +334,12 @@ People eat the same breakfast for weeks, so the free tier stretches a long way.
 Workout cache stores MET + minutes only, and burn is re-priced per request
 against current bodyweight — so the cache stays valid as weight changes.
 
+- **Coach chat** → under *Tips for tomorrow* on Today, ask anything about the day:
+  "how do I get more points?", "what should I eat for dinner?". Answers come from
+  the same briefing as the tips, plus how each score line was earned and what you
+  ate food by food (`src/lib/coachContext.ts`). Nothing is stored or cached, and
+  each question is one Gemini request against the free daily quota.
+
 If `GEMINI_API_KEY` is missing the app still works: the composer falls back to
 manual entry.
 

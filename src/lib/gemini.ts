@@ -1,6 +1,7 @@
 import "server-only";
 import { createHash } from "crypto";
 import { EMPTY_MICROS, MICRO_KEYS, type AdvicePoint, type Confidence, type Exercise, type FoodItem, type Micros } from "./types.ts";
+import type { ChatTurn } from "./chat.ts";
 
 /* ---------------------------------------------------------------------
  * Gemini — server side only. The key must never reach the browser.
@@ -563,6 +564,72 @@ export async function generateAdvice(summary: string): Promise<AdviceResult> {
         amount: Math.max(-4000, Math.min(4000, num(p.amount, 4000) * (Number(p.amount) < 0 ? -1 : 1))),
       })),
   };
+}
+
+/* -------------------------------- CHAT ------------------------------ */
+
+const CHAT_SCHEMA: SchemaNode = {
+  type: "OBJECT",
+  properties: {
+    answer: {
+      type: "STRING",
+      description: "The reply: two to six plain sentences, or a short list with '- ' bullets",
+    },
+  },
+  required: ["answer"],
+};
+
+const CHAT_PROMPT = `You are the FitClash coach, answering a question from someone who logs their
+food and training in India. Below the rules you get a briefing of their day: their targets,
+what they ate food by food, their training, how many points each line of today's score earned
+and why, any limits they have passed, recovery, and their last week.
+
+Answer the question they actually asked, specifically:
+
+- Use their numbers. "You're 38 g short on protein — 150 g of paneer tikka, or two eggs and a
+  katori of dal, closes it" beats "eat more protein".
+- For "how do I get more points", point at the score lines with the most points still
+  available and say what it would take, in grams, kcal or minutes.
+- How the score works: protein, fibre and each vitamin or mineral score full from the target
+  up to 1.5 times it, then fall to nothing at double. The calorie target is full within 2%
+  and falls to nothing at 30% off, over or under. Calories burned and active minutes fill up
+  at the target and are never marked down for doing more. Added sugar and saturated fat lose
+  points once over their limits. Logging food and training is worth 10 points.
+- Name ordinary Indian foods with realistic portions. When they ask what to eat, give two or
+  three concrete options that fit what is left of their targets today.
+- If something has not been logged, say so rather than guessing.
+- Keep it short: two to six sentences, or a short list. No headings, no emoji, no exclamation
+  marks. Address them as "you".
+- General fitness and food guidance only. Do not diagnose, name conditions or give supplement
+  doses; for anything medical, suggest a doctor.
+- If the question is not about their food, training, sleep, water or score, say in one
+  sentence that you can only help with those.
+
+Return only JSON matching the schema.`;
+
+/**
+ * One answer from the coach chat. The briefing comes from loadCoachContext();
+ * the history and question have already been through cleanHistory() and
+ * cleanQuestion() in chat.ts.
+ */
+export async function answerCoachQuestion(
+  briefing: string,
+  history: ChatTurn[],
+  question: string,
+): Promise<string> {
+  const conversation = history
+    .map((t) => `${t.role === "user" ? "THEM" : "YOU"}: ${t.text}`)
+    .join("\n");
+
+  const userText =
+    `${briefing}\n\n` +
+    (conversation ? `CONVERSATION SO FAR\n${conversation}\n\n` : "") +
+    `THEIR QUESTION\n${question}`;
+
+  const raw = await generate<{ answer?: string }>(CHAT_PROMPT, userText, CHAT_SCHEMA);
+  const answer = String(raw.answer ?? "").trim().slice(0, 2000);
+  if (!answer) throw new GeminiError("The coach came back empty. Try asking again.");
+  return answer;
 }
 
 /* ------------------------------- SWAPS ------------------------------ */

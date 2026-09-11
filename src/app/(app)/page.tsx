@@ -9,6 +9,7 @@ import { DataRow, EmptyState, Metric, PageHeader, Ring, Section, StreakBadge } f
 import Disclosure from "@/components/Disclosure";
 import SubTabs from "@/components/SubTabs";
 import AdviceCard from "@/components/AdviceCard";
+import CoachChat from "@/components/CoachChat";
 import SleepCard from "@/components/SleepCard";
 import RecoveryCard from "@/components/RecoveryCard";
 import MicroPanel from "@/components/MicroPanel";
@@ -110,6 +111,10 @@ export default async function TodayPage() {
 
       <Section title="Tips for tomorrow">
         <AdviceCard hasData={hasData} />
+      </Section>
+
+      <Section title="Ask the coach">
+        <CoachChat />
       </Section>
     </>
   );
